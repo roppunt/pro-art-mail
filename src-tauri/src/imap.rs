@@ -1,5 +1,6 @@
-//! Verbinding met de IMAP-server. Stap 1: alleen lezen — mappen worden met EXAMINE geopend
-//! en berichten met BODY.PEEK opgehaald, zodat er op de server niets verandert (ook niet gelezen/ongelezen).
+//! Verbinding met de IMAP-server. Berichten worden altijd met BODY.PEEK opgehaald, dus openen
+//! alleen verandert niets; gelezen markeren gebeurt bewust met `markeer`. De achtergrondverbinding
+//! (sync.rs) opent mappen alleen-lezen (EXAMINE), de verbinding voor de gebruiker met SELECT.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,8 +24,11 @@ pub type ImapSessie = Session<TlsStream<TcpStream>>;
 
 pub struct Verbinding {
     sessie: ImapSessie,
-    /// Welke map nu met EXAMINE open staat, om niet bij elke opdracht opnieuw te openen.
+    /// Welke map nu open staat, om niet bij elke opdracht opnieuw te openen.
     open_map: Option<String>,
+    alleen_lezen: bool,
+    /// Server kent UID MOVE (RFC 6851); anders kopiëren + verwijderen.
+    heeft_move: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -41,7 +45,7 @@ pub struct Map {
 }
 
 
-pub async fn verbind(host: &str, poort: u16, gebruiker: &str, wachtwoord: &str) -> Result<Verbinding> {
+pub async fn verbind(host: &str, poort: u16, gebruiker: &str, wachtwoord: &str, alleen_lezen: bool) -> Result<Verbinding> {
     let mut wortels = RootCertStore::empty();
     wortels.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = ClientConfig::builder().with_root_certificates(wortels).with_no_client_auth();
@@ -62,7 +66,9 @@ pub async fn verbind(host: &str, poort: u16, gebruiker: &str, wachtwoord: &str) 
         }
         e => anyhow!(e).context("Inloggen mislukt"),
     })?;
-    Ok(Verbinding { sessie, open_map: None })
+    let mut sessie = sessie;
+    let heeft_move = sessie.capabilities().await.map(|c| c.has_str("MOVE")).unwrap_or(false);
+    Ok(Verbinding { sessie, open_map: None, alleen_lezen, heeft_move })
 }
 
 impl Verbinding {
@@ -109,9 +115,10 @@ impl Verbinding {
         Ok(uit)
     }
 
-    /// Opent een map alleen-lezen (EXAMINE). Geeft (UIDVALIDITY, aantal berichten).
+    /// Opent een map (EXAMINE of SELECT, zie `alleen_lezen`). Geeft (UIDVALIDITY, aantal berichten).
     pub async fn open(&mut self, map: &str) -> Result<(u32, u32)> {
-        let mb = self.sessie.examine(map).await.with_context(|| format!("Kan map {map} niet openen"))?;
+        let mb = if self.alleen_lezen { self.sessie.examine(map).await } else { self.sessie.select(map).await }
+            .with_context(|| format!("Kan map {map} niet openen"))?;
         self.open_map = Some(map.to_string());
         Ok((mb.uid_validity.unwrap_or(0), mb.exists))
     }
@@ -121,6 +128,30 @@ impl Verbinding {
             self.open(map).await?;
         }
         Ok(())
+    }
+
+    /// Pad van een vaste map ("verzonden", "concepten", "prullenbak", "archief") zonder STATUS:
+    /// eerst op server-kenmerk (SPECIAL-USE), anders op naam.
+    pub async fn vaste_map(&mut self, soort: &str) -> Result<Option<(String, String)>> {
+        let namen: Vec<_> = self.sessie.list(Some(""), Some("*")).await?.try_collect().await?;
+        let mut op_naam = None;
+        for n in &namen {
+            let pad = n.name().to_string();
+            let scheiding = n.delimiter().unwrap_or(".").to_string();
+            let met_kenmerk = n.attributes().iter().any(|a| {
+                matches!((soort, a), ("verzonden", NameAttribute::Sent) | ("concepten", NameAttribute::Drafts)
+                    | ("prullenbak", NameAttribute::Trash) | ("archief", NameAttribute::Archive) | ("spam", NameAttribute::Junk))
+            });
+            if met_kenmerk {
+                return Ok(Some((pad, scheiding)));
+            }
+            let leesbaar = utf7_imap::decode_utf7_imap(pad.clone());
+            let kort = leesbaar.strip_prefix(&format!("INBOX{scheiding}")).unwrap_or(&leesbaar).to_string();
+            if op_naam.is_none() && soort_van(&pad, &kort, &[]) == soort {
+                op_naam = Some((pad, scheiding));
+            }
+        }
+        Ok(op_naam)
     }
 
     /// Alle selecteerbare mappen, zonder verdere gegevens (voor het bijwerken van de kopie).
@@ -194,7 +225,7 @@ impl Verbinding {
     /// Wacht (IDLE) op nieuws in de open map, tot `max` verstreken is of `signaal` komt.
     /// Geeft de verbinding daarna terug; IDLE neemt hem tijdelijk over.
     pub async fn wacht(self, signaal: &Notify, max: Duration) -> Result<Self> {
-        let open_map = self.open_map;
+        let (open_map, alleen_lezen, heeft_move) = (self.open_map, self.alleen_lezen, self.heeft_move);
         let mut handle = self.sessie.idle();
         handle.init().await?;
         {
@@ -210,15 +241,83 @@ impl Verbinding {
             }
         }
         let sessie = handle.done().await?;
-        Ok(Verbinding { sessie, open_map })
+        Ok(Verbinding { sessie, open_map, alleen_lezen, heeft_move })
+    }
+
+    /// Het volledige bericht zoals het op de server staat (zonder het als gelezen te markeren).
+    pub async fn ruw(&mut self, map: &str, uid: u32) -> Result<Vec<u8>> {
+        self.zorg_open(map).await?;
+        let fetches: Vec<_> = self.sessie.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])").await?.try_collect().await?;
+        let f = fetches.first().ok_or_else(|| anyhow!("Bericht niet gevonden (misschien verplaatst)"))?;
+        Ok(f.body().ok_or_else(|| anyhow!("Leeg bericht"))?.to_vec())
     }
 
     pub async fn bericht(&mut self, map: &str, uid: u32) -> Result<mail::Bericht> {
+        let ruw = self.ruw(map, uid).await?;
+        mail::bericht(uid, &ruw)
+    }
+
+    /// Gelezen of ongelezen markeren.
+    pub async fn markeer(&mut self, map: &str, uids: &[u32], gelezen: bool) -> Result<()> {
         self.zorg_open(map).await?;
-        let fetches: Vec<_> = self.sessie.uid_fetch(uid.to_string(), "(UID FLAGS BODY.PEEK[])").await?.try_collect().await?;
-        let f = fetches.first().ok_or_else(|| anyhow!("Bericht niet gevonden (misschien verplaatst)"))?;
-        let ruw = f.body().ok_or_else(|| anyhow!("Leeg bericht"))?;
-        mail::bericht(uid, ruw)
+        let teken = if gelezen { "+" } else { "-" };
+        let _: Vec<_> = self.sessie.uid_store(uid_reeks(uids), format!("{teken}FLAGS.SILENT (\\Seen)")).await?.try_collect().await?;
+        Ok(())
+    }
+
+    /// Beantwoord-vlag zetten (na versturen van een antwoord).
+    pub async fn markeer_beantwoord(&mut self, map: &str, uid: u32) -> Result<()> {
+        self.zorg_open(map).await?;
+        let _: Vec<_> = self.sessie.uid_store(uid.to_string(), "+FLAGS.SILENT (\\Answered)").await?.try_collect().await?;
+        Ok(())
+    }
+
+    /// Verplaatst berichten naar een andere map (UID MOVE, of kopiëren + verwijderen).
+    pub async fn verplaats(&mut self, map: &str, uids: &[u32], doel: &str) -> Result<()> {
+        self.zorg_open(map).await?;
+        let reeks = uid_reeks(uids);
+        if self.heeft_move {
+            self.sessie.uid_mv(&reeks, doel).await?;
+        } else {
+            self.sessie.uid_copy(&reeks, doel).await?;
+            let _: Vec<_> = self.sessie.uid_store(&reeks, "+FLAGS.SILENT (\\Deleted)").await?.try_collect().await?;
+            let _: Vec<_> = self.sessie.uid_expunge(&reeks).await?.try_collect().await?;
+        }
+        Ok(())
+    }
+
+    /// Maakt een map aan als hij nog niet bestaat (bv. `Archives.2026`).
+    pub async fn zorg_map(&mut self, map: &str) -> Result<()> {
+        if !self.mappaden().await?.iter().any(|m| m == map) {
+            self.sessie.create(map).await.with_context(|| format!("Kan map {map} niet aanmaken"))?;
+            let _ = self.sessie.subscribe(map).await;
+        }
+        Ok(())
+    }
+
+    /// Zet een volledig bericht in een map (verzonden mail, concepten).
+    pub async fn bewaar_in(&mut self, map: &str, vlaggen: &str, ruw: &[u8]) -> Result<()> {
+        self.sessie.append(map, Some(vlaggen), None, ruw).await.with_context(|| format!("Kan niet bewaren in {map}"))?;
+        Ok(())
+    }
+
+    /// Verwijdert berichten definitief (alleen voor oude versies van een concept).
+    pub async fn wis(&mut self, map: &str, uids: &[u32]) -> Result<()> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+        self.zorg_open(map).await?;
+        let reeks = uid_reeks(uids);
+        let _: Vec<_> = self.sessie.uid_store(&reeks, "+FLAGS.SILENT (\\Deleted)").await?.try_collect().await?;
+        let _: Vec<_> = self.sessie.uid_expunge(&reeks).await?.try_collect().await?;
+        Ok(())
+    }
+
+    /// UID's van berichten met een bepaalde Message-ID (om een oud concept terug te vinden).
+    pub async fn zoek_message_id(&mut self, map: &str, message_id: &str) -> Result<Vec<u32>> {
+        self.zorg_open(map).await?;
+        let schoon: String = message_id.chars().filter(|c| !c.is_control() && *c != '"' && *c != '\\').collect();
+        Ok(self.sessie.uid_search(format!("HEADER Message-ID \"{schoon}\"")).await?.into_iter().collect())
     }
 
     pub async fn afmelden(mut self) {

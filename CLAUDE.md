@@ -36,17 +36,30 @@ Een eigen email programma/app in eigen styl
 ## Nog open
 - **Uiterlijk: alle drie de ontwerpen worden thema's in de app; de gebruiker kiest zelf** (besluit Robert 2026-10-22). Canvas https://claude.ai/artifact/WwjHqQ7Ck7YUfRf44egvb7 :
   A rustig en vertrouwd (licht, 3 kolommen, blauw), B groot en eenvoudig (grote letters/knoppen, 2 kolommen, oranje),
-  C atelier (donker, verfkleuren). De knop "Opbergen in <maand>" uit de ontwerpen vervalt (er zijn geen maandmappen);
-  voorstel "Archiveren" → `Archives.<jaar>`, wacht op Robert.
+  C atelier (donker, verfkleuren). De knop "Opbergen in <maand>" uit de ontwerpen vervalt (er zijn geen maandmappen).
+
+## Besluiten voor stap 4 (Robert, 2026-10-22)
+- **Archiveren** → `Archives.<jaar van de mail>` (map zo nodig aanmaken), zoals het tot 2022 ging.
+- **Verzonden** opslaan in `Sent Messages` (in gebruik t/m vandaag; `Sent` laatst 2026-09-28). Prullenbak = `Trash`
+  (`Deleted Messages` sinds 2022 ongebruikt).
+- **Dubbele mappen laten zoals ze zijn** (geen risico voor eM Client/telefoons).
+- **Ondertekening:** Robert overlegt nog. Voorlopig: kiezen bij elke mail uit een lijstje (beheren in Instellingen).
 
 ## Code en bouwen (stap 1 gebouwd 2026-10-22)
 - **Tauri 2 + SvelteKit (Svelte 5, TypeScript, SPA)**. Identifier `nl.pro-art.mail`, productnaam "Pro-Art Mail".
 - Rust (`src-tauri/src/`):
-  - `account.rs` — account op deze pc: `account.json` in de app-configmap (adres + vaste servers van WBV),
-    wachtwoord via crate `keyring` 4 (Windows Referentiebeheer / Secret Service), dienstnaam `pro-art-mail`.
-  - `imap.rs` — `async-imap` + `tokio-rustls` (ring, webpki-roots). **Stap 1 = alleen lezen**: mappen met `EXAMINE`,
-    berichten met `BODY.PEEK`, dus niets verandert op de server (ook gelezen/ongelezen niet).
-  - `mail.rs` — ontleden met `mail-parser`, HTML opschonen met `ammonia` (scripts/formulieren weg, inline stijlen blijven).
+  - `account.rs` — **meerdere accounts** in `accounts.json` (app-configmap; overstap van v1 `account.json` automatisch):
+    adres, afzendernaam, IMAP/SMTP-host+poort, `verzonden_map` (pro-art.nl: `Sent Messages`). Standaarden per domein in
+    `Account::standaard` (pro-art.nl → mail.pro-art.nl, gmail.com → imap/smtp.gmail.com, anders mail.<domein>).
+    Wachtwoorden via crate `keyring` 4 (dienst `pro-art-mail`). Ook `ondertekeningen.json` (gedeeld door alle accounts).
+  - `imap.rs` — `async-imap` + `tokio-rustls` (ring, webpki-roots). Berichten altijd met `BODY.PEEK`; gelezen markeren
+    gaat expliciet (`markeer`). Achtergrondverbinding opent mappen met EXAMINE, de gebruikersverbinding met SELECT.
+    Schrijven: `markeer`, `markeer_beantwoord`, `verplaats` (UID MOVE, anders COPY+EXPUNGE), `zorg_map` (CREATE),
+    `bewaar_in` (APPEND), `wis` (alleen oude conceptversies), `vaste_map` (SPECIAL-USE, anders op naam).
+  - `mail.rs` — ontleden met `mail-parser`, HTML opschonen met `ammonia` (scripts/formulieren weg, inline stijlen blijven);
+    `cid:`-afbeeldingen worden data-URI's; bijlagen ophalen; Message-ID/References voor beantwoorden.
+  - `versturen.rs` — concept → mail met `lettre` (alternative text+html, bijlagen van pc of uit een bestaand bericht),
+    SMTP 465 = implicit TLS, anders STARTTLS. Vaste Message-ID per concept, zodat een oude versie in Concepten te vinden is.
   - `cache.rs` — **lokale kopie** van de kopregels (SQLite via `rusqlite` bundled, `kopie.sqlite` in de app-datamap, ~6 MB
     voor ~33.600 berichten). Tabellen `mappen` (pad, uidvalidity, klaar) en `koppen` (map, uid, afzender, onderwerp, datum,
     vlaggen, kolom `zoek` = kleine letters voor LIKE-zoeken, ~4 ms). Alleen een kopie: weggooien mag, wordt opnieuw opgebouwd.
@@ -56,10 +69,15 @@ Een eigen email programma/app in eigen styl
     nieuwe kopregels in stukken van 500 met `BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE CONTENT-TYPE)]` + INTERNALDATE
     (terugval als Date ontbreekt). Daarna IDLE op INBOX (max 10 min). Events naar de interface: `map-gewijzigd`,
     `sync-voortgang`, `sync-fout`. Eerste volledige opbouw op ai-ubuntu: < 1 minuut.
-  - `lib.rs` — Tauri-opdrachten `huidig_account`, `inloggen`, `afmelden`, `mappen`, `berichten` (uit de kopie, `vanaf`/`aantal`),
+  - `lib.rs` — per account een `AccountToestand` (verbinding, kopie `kopie-<adres>.sqlite`, sync-taak). Na versturen:
+    APPEND in Verzonden, `\Answered` op het origineel, oude conceptversies weg. Archiveren → `Archives.<jaar van de mail>`.
+    Verwijderen → prullenbak (nooit definitief). Bijlage openen = tijdelijk bestand + standaardprogramma.
+    Tauri-opdrachten `huidig_account`, `inloggen`, `afmelden`, `mappen`, `berichten` (uit de kopie, `vanaf`/`aantal`),
     `zoek` (kopie, alle mappen), `zoek_in_tekst` (IMAP `UID SEARCH TEXT` op de server, één map), `bericht`. `mappen` doet STATUS per map (aantal/ongelezen) en maakt van dubbele vaste mappen (bv. `Sent` + `Sent Messages`)
     alleen de volste "Verzonden"; de andere blijft zichtbaar onder zijn eigen naam. Eén IMAP-verbinding, bij een fout één keer opnieuw verbinden (macro `met_verbinding!`).
-- Interface (`src/`): `routes/+page.svelte` (inloggen of hoofdscherm, laadt lettertypen en thema), `lib/Hoofd.svelte`
+- Interface (`src/`): `routes/+page.svelte` (accounts laden, laatst gebruikte account onthouden, lettertypen en thema),
+  `lib/AccountFormulier.svelte` (toevoegen/wijzigen, servers automatisch), `lib/Opstellen.svelte` (opstelvenster: aanvullen
+  van adressen uit de kopie, opmaak, ondertekening kiezen, bijlagen; sluiten = bewaren in Concepten), `lib/Hoofd.svelte`
   (alle drie de indelingen: A drie kolommen, B tabbladen + knoppen onderaan, C donker; klassen `.thema-a/b/c`),
   `lib/thema.ts` (keuze in `localStorage`, `data-thema` op `<html>`), `lib/Instellingen.svelte` (thema kiezen, afmelden),
   `lib/Pictogram.svelte` (lijnpictogrammen),
@@ -77,10 +95,13 @@ Een eigen email programma/app in eigen styl
   npm run check                                # Svelte/TypeScript controleren
   ```
 
+## Ideeën voor later
+- "Verzonden" als samengevoegde weergave van `Sent` + `Sent Messages` (zolang webmail en eM Client naast de app gebruikt worden).
+
 ## Stappenplan
 1. ✅ Basis: verbinden, mappen, postvak IN, bericht lezen (alleen lezen). Getest door Robert op ai-ubuntu 2026-10-22: inloggen werkt, mails zichtbaar.
 2. ✅ (2026-10-22, goedgekeurd door Robert, gepusht) De drie thema's (A/B/C) + keuze in Instellingen, per pc onthouden.
 3. ✅ (2026-10-22, goedgekeurd, gepusht; tekstzoeken op de server < 1 s) Zoeken en snel bladeren (lokale SQLite-kopie), vloeiend scrollen, IDLE.
-4. Beantwoorden/doorsturen/nieuw (SMTP 465, `lettre`), gelezen markeren, archiveren (?), verwijderen. Verzonden opslaan in de
-   map die eM Client gebruikt.
+4. ✅ (2026-10-22, getest door Robert: versturen, beantwoorden, bijlagen, archiveren, verwijderen, concepten, ondertekening; gepusht) Beantwoorden/allen/doorsturen/nieuw, concepten, ondertekeningen,
+   bijlagen openen/opslaan/toevoegen, gelezen/ongelezen, archiveren, verwijderen, **meerdere accounts**.
 5. Windows-installatie + automatische updates via GitHub (`roppunt/pro-art-mail`, **openbaar**, besluit Robert), proefdraaien op KANTOOR.

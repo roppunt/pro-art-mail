@@ -1,17 +1,55 @@
 <script lang="ts">
+  import { ask } from "@tauri-apps/plugin-dialog";
+  import AccountFormulier from "./AccountFormulier.svelte";
+  import * as api from "./api";
+  import type { Account, Ondertekening } from "./api";
   import Pictogram from "./Pictogram.svelte";
   import { THEMAS, type ThemaId } from "./thema";
 
   let {
     thema,
     kies,
-    email,
-    afmelden,
+    accounts,
+    accountsGewijzigd,
     sluit,
-  }: { thema: ThemaId; kies: (t: ThemaId) => void; email: string; afmelden: () => void; sluit: () => void } = $props();
+  }: {
+    thema: ThemaId;
+    kies: (t: ThemaId) => void;
+    accounts: Account[];
+    accountsGewijzigd: (lijst: Account[], kies?: string) => void;
+    sluit: () => void;
+  } = $props();
 
   let dialoog: HTMLDialogElement;
-  $effect(() => dialoog.showModal());
+  // null = lijst tonen; "nieuw" = account toevoegen; anders het adres dat bewerkt wordt
+  let bewerk = $state<string | null>(null);
+  let ondertekeningen = $state<Ondertekening[]>([]);
+  let ondertekeningenBewaard = $state(true);
+  let fout = $state("");
+
+  $effect(() => {
+    dialoog.showModal();
+    api.ondertekeningen().then((l) => (ondertekeningen = l));
+  });
+
+  async function verwijderAccount(email: string) {
+    const ok = await ask(`${email} van deze pc halen? De mail blijft gewoon op de server staan.`, { title: "Mailadres weghalen", kind: "warning", okLabel: "Weghalen", cancelLabel: "Annuleren" });
+    if (!ok) return;
+    try {
+      accountsGewijzigd(await api.accountVerwijderen(email));
+    } catch (e) {
+      fout = String(e);
+    }
+  }
+
+  async function bewaarOndertekeningen() {
+    try {
+      await api.bewaarOndertekeningen(ondertekeningen.filter((o) => o.naam.trim() || o.tekst.trim()));
+      ondertekeningenBewaard = true;
+    } catch (e) {
+      fout = String(e);
+    }
+  }
 </script>
 
 <dialog bind:this={dialoog} onclose={sluit} aria-labelledby="inst-titel">
@@ -34,16 +72,55 @@
     {/each}
   </div>
 
-  <h3>Account</h3>
-  <div class="account">
-    <span>{email}</span>
-    <button type="button" class="afmelden" onclick={afmelden}>Afmelden op deze pc</button>
+  <h3>Mailadressen op deze pc</h3>
+  {#if fout}<p class="fout" role="alert">{fout}</p>{/if}
+  {#if bewerk}
+    <div class="kader">
+      <AccountFormulier
+        bestaand={bewerk === "nieuw" ? null : (accounts.find((a) => a.email === bewerk) ?? null)}
+        klaar={(lijst, email) => {
+          accountsGewijzigd(lijst, bewerk === "nieuw" ? email : undefined);
+          bewerk = null;
+        }}
+        annuleer={() => (bewerk = null)}
+      />
+    </div>
+  {:else}
+    {#each accounts as a (a.email)}
+      <div class="account">
+        <span><strong>{a.email}</strong>{#if a.naam}<span class="zacht"> · {a.naam}</span>{/if}</span>
+        <span class="knoppen">
+          <button type="button" class="afmelden" onclick={() => (bewerk = a.email)}>Wijzigen</button>
+          <button type="button" class="afmelden" onclick={() => verwijderAccount(a.email)}>Van deze pc halen</button>
+        </span>
+      </div>
+    {/each}
+    <button type="button" class="afmelden toevoegen" onclick={() => (bewerk = "nieuw")}><Pictogram naam="plus" maat={14} /> Mailadres toevoegen</button>
+  {/if}
+
+  <h3>Ondertekeningen</h3>
+  <p class="zacht">Bij het schrijven van een mail kies je welke eronder komt.</p>
+  {#each ondertekeningen as o, i (i)}
+    <div class="ondertekening">
+      <input type="text" bind:value={o.naam} placeholder="Naam, bv. Winkel" aria-label="Naam van de ondertekening" oninput={() => (ondertekeningenBewaard = false)} />
+      <textarea rows="3" bind:value={o.tekst} placeholder={"Met vriendelijke groet,\nPro Art Nijmegen"} aria-label="Tekst van de ondertekening" oninput={() => (ondertekeningenBewaard = false)}></textarea>
+      <button type="button" class="sluit" aria-label="Ondertekening weghalen" onclick={() => ((ondertekeningen = ondertekeningen.filter((_, j) => j !== i)), (ondertekeningenBewaard = false))}>
+        <Pictogram naam="prullenbak" maat={16} />
+      </button>
+    </div>
+  {/each}
+  <div class="knoppen">
+    <button type="button" class="afmelden" onclick={() => ((ondertekeningen = [...ondertekeningen, { naam: "", tekst: "" }]), (ondertekeningenBewaard = false))}>
+      <Pictogram naam="plus" maat={14} /> Ondertekening toevoegen
+    </button>
+    {#if !ondertekeningenBewaard}<button type="button" class="bewaar" onclick={bewaarOndertekeningen}>Ondertekeningen bewaren</button>{/if}
   </div>
 </dialog>
 
 <style>
   dialog {
     width: min(760px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
     padding: 28px 32px 32px;
     border: 1px solid var(--rand);
     border-radius: 16px;
@@ -176,9 +253,62 @@
   }
   .afmelden {
     height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 0 14px;
     border: 1px solid var(--rand);
     border-radius: var(--radius);
     background: var(--vlak);
+  }
+  .account + .account {
+    margin-top: 8px;
+  }
+  .toevoegen {
+    margin-top: 10px;
+  }
+  .knoppen {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .kader {
+    padding: 16px;
+    border: 1px solid var(--rand);
+    border-radius: 10px;
+  }
+  .ondertekening {
+    display: grid;
+    grid-template-columns: 160px minmax(0, 1fr) 36px;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .ondertekening input,
+  .ondertekening textarea {
+    padding: 8px 10px;
+    border: 1px solid var(--rand);
+    border-radius: var(--radius);
+    background: var(--invoer);
+    resize: vertical;
+  }
+  .ondertekening input {
+    height: 38px;
+    box-sizing: border-box;
+  }
+  .bewaar {
+    height: 36px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: var(--accent-tekst);
+    font-weight: 600;
+  }
+  .fout {
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    background: var(--fout-zacht);
+    color: var(--fout);
   }
 </style>

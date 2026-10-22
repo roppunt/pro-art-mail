@@ -193,6 +193,35 @@ impl Cache {
         Ok(uit)
     }
 
+    pub fn zet_gelezen(&self, pad: &str, uids: &[u32], gelezen: bool) -> Result<()> {
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction()?;
+        for uid in uids {
+            tx.execute("UPDATE koppen SET gelezen = ?3 WHERE map = ?1 AND uid = ?2", params![pad, uid, gelezen])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Adressen waarvan mail binnenkwam, als "Naam <adres>", vaakst gebruikte eerst.
+    pub fn adressen(&self, begin: &str, max: u32) -> Result<Vec<String>> {
+        let b = begin.trim().to_lowercase().replace(['%', '_'], "");
+        if b.len() < 2 {
+            return Ok(vec![]);
+        }
+        let db = self.db.lock().unwrap();
+        let mut st = db.prepare(
+            "SELECT van_naam, van_adres FROM koppen
+             WHERE van_adres != '' AND (lower(van_adres) LIKE ?1 OR lower(van_naam) LIKE ?1 OR lower(van_naam) LIKE ?2)
+             GROUP BY lower(van_adres) ORDER BY COUNT(*) DESC LIMIT ?3",
+        )?;
+        let rijen = st.query_map(params![format!("{b}%"), format!("% {b}%"), max], |r| {
+            let (naam, adres): (String, String) = (r.get(0)?, r.get(1)?);
+            Ok(if naam.is_empty() || naam == adres { adres } else { format!("{naam} <{adres}>") })
+        })?;
+        Ok(rijen.collect::<Result<_, _>>()?)
+    }
+
     /// Na afmelden: niets van dit account op de pc laten staan.
     pub fn wis_alles(&self) -> Result<()> {
         self.db.lock().unwrap().execute_batch("DELETE FROM koppen; DELETE FROM mappen; VACUUM;")?;

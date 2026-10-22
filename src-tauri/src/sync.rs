@@ -6,6 +6,7 @@
 //! Ook hier alleen lezen: EXAMINE en BODY.PEEK.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -26,23 +27,54 @@ pub struct Sync {
     pub signaal: Notify,
     /// Map waar de gebruiker nu naar kijkt; die komt als eerste aan de beurt.
     pub voorrang: Mutex<Option<String>>,
+    /// Account verwijderd: de achtergrondverbinding stopt.
+    pub gestopt: AtomicBool,
+    /// Mappen die de volgende ronde zeker bijgewerkt moeten worden (bv. Verzonden na versturen,
+    /// de doelmap na verplaatsen), ook als het geen ronde voor alle mappen is.
+    pub extra: Mutex<HashSet<String>>,
+}
+
+impl Sync {
+    /// Werk deze map zo snel mogelijk bij.
+    pub fn werk_bij(&self, map: &str) {
+        self.extra.lock().unwrap().insert(map.to_string());
+        self.signaal.notify_one();
+    }
+
+    pub fn stop(&self) {
+        self.gestopt.store(true, Ordering::SeqCst);
+        self.signaal.notify_one();
+    }
 }
 
 #[derive(Serialize, Clone)]
 struct Voortgang<'a> {
+    account: &'a str,
     map: &'a str,
     gedaan: usize,
     totaal: usize,
 }
 
-pub fn start(app: AppHandle, cache: Arc<Cache>, sync: Arc<Sync>) {
+#[derive(Serialize, Clone)]
+pub struct Gebeurtenis<'a> {
+    pub account: &'a str,
+    pub map: &'a str,
+}
+
+#[derive(Serialize, Clone)]
+struct Fout<'a> {
+    account: &'a str,
+    fout: String,
+}
+
+pub fn start(app: AppHandle, email: String, cache: Arc<Cache>, sync: Arc<Sync>) {
     tauri::async_runtime::spawn(async move {
-        loop {
-            match ronde(&app, &cache, &sync).await {
+        while !sync.gestopt.load(Ordering::SeqCst) {
+            match ronde(&app, &email, &cache, &sync).await {
                 Ok(()) => {}
                 Err(e) => {
-                    eprintln!("bijwerken mislukt: {e:#}");
-                    let _ = app.emit("sync-fout", e.to_string());
+                    eprintln!("bijwerken {email} mislukt: {e:#}");
+                    let _ = app.emit("sync-fout", Fout { account: &email, fout: e.to_string() });
                     // Even wachten (of tot er iets gebeurt) en dan opnieuw verbinden.
                     let _ = tokio::time::timeout(Duration::from_secs(60), sync.signaal.notified()).await;
                 }
@@ -51,21 +83,18 @@ pub fn start(app: AppHandle, cache: Arc<Cache>, sync: Arc<Sync>) {
     });
 }
 
-async fn ronde(app: &AppHandle, cache: &Cache, sync: &Sync) -> Result<()> {
-    let Some(acc) = account::lees(app)? else {
-        // Nog niet ingelogd: wachten op het signaal na inloggen.
-        sync.signaal.notified().await;
-        return Ok(());
-    };
+async fn ronde(app: &AppHandle, email: &str, cache: &Cache, sync: &Sync) -> Result<()> {
+    let acc = account::zoek(app, email)?;
     let ww = account::wachtwoord(&acc.email)?;
-    let mut v = imap::verbind(&acc.imap_host, acc.imap_poort, &acc.email, &ww).await?;
-    let _ = app.emit("sync-fout", "");
+    let mut v = imap::verbind(&acc.imap_host, acc.imap_poort, &acc.email, &ww, true).await?;
+    let _ = app.emit("sync-fout", Fout { account: email, fout: String::new() });
     let mut laatste_alles: Option<Instant> = None;
     loop {
         let paden = v.mappaden().await?;
         cache.ruim_mappen_op(&paden)?;
         let alles = laatste_alles.is_none_or(|t| t.elapsed() > ALLES_ELKE);
         let voorrang = sync.voorrang.lock().unwrap().clone();
+        let extra: Vec<String> = sync.extra.lock().unwrap().drain().collect();
 
         let mut volgorde: Vec<String> = Vec::new();
         for p in voorrang.iter().chain(std::iter::once(&"INBOX".to_string())) {
@@ -74,19 +103,19 @@ async fn ronde(app: &AppHandle, cache: &Cache, sync: &Sync) -> Result<()> {
             }
         }
         for p in &paden {
-            if !volgorde.contains(p) && (alles || !cache.is_klaar(p)?) {
+            if !volgorde.contains(p) && (alles || extra.contains(p) || !cache.is_klaar(p)?) {
                 volgorde.push(p.clone());
             }
         }
         for p in &volgorde {
-            werk_map_bij(app, cache, &mut v, p).await?;
+            werk_map_bij(app, email, cache, &mut v, p).await?;
         }
         if alles {
             laatste_alles = Some(Instant::now());
         }
 
-        // Afgemeld of ander account? Dan opnieuw beginnen.
-        if account::lees(app)?.map(|a| a.email) != Some(acc.email.clone()) {
+        // Account verwijderd of instellingen gewijzigd? Dan stoppen of opnieuw verbinden.
+        if sync.gestopt.load(Ordering::SeqCst) || account::zoek(app, email).ok() != Some(acc.clone()) {
             v.afmelden().await;
             return Ok(());
         }
@@ -95,7 +124,7 @@ async fn ronde(app: &AppHandle, cache: &Cache, sync: &Sync) -> Result<()> {
     }
 }
 
-async fn werk_map_bij(app: &AppHandle, cache: &Cache, v: &mut imap::Verbinding, map: &str) -> Result<()> {
+async fn werk_map_bij(app: &AppHandle, account: &str, cache: &Cache, v: &mut imap::Verbinding, map: &str) -> Result<()> {
     let (uidvalidity, aantal) = v.open(map).await?;
     cache.controleer_map(map, uidvalidity)?;
     let server = if aantal > 0 { v.alle_vlaggen().await? } else { Default::default() };
@@ -122,12 +151,12 @@ async fn werk_map_bij(app: &AppHandle, cache: &Cache, v: &mut imap::Verbinding, 
         }
         cache.voeg_toe(map, &koppen)?;
         let gedaan = (i * PER_KEER + stuk.len()).min(nieuw.len());
-        let _ = app.emit("sync-voortgang", Voortgang { map, gedaan, totaal: nieuw.len() });
-        let _ = app.emit("map-gewijzigd", map);
+        let _ = app.emit("sync-voortgang", Voortgang { account, map, gedaan, totaal: nieuw.len() });
+        let _ = app.emit("map-gewijzigd", Gebeurtenis { account, map });
     }
     cache.zet_klaar(map)?;
     if veranderd {
-        let _ = app.emit("map-gewijzigd", map);
+        let _ = app.emit("map-gewijzigd", Gebeurtenis { account, map });
     }
     Ok(())
 }

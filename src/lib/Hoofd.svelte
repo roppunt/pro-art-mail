@@ -1,20 +1,31 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
   import { untrack } from "svelte";
+  import { save } from "@tauri-apps/plugin-dialog";
   import * as api from "./api";
-  import type { Account, Bericht, Kop, Map, Voortgang } from "./api";
+  import type { Account, Bericht, Gebeurtenis, Kop, Map, Voortgang } from "./api";
   import Inhoud from "./Inhoud.svelte";
   import Instellingen from "./Instellingen.svelte";
+  import Opstellen, { type Begin } from "./Opstellen.svelte";
   import Pictogram from "./Pictogram.svelte";
   import { grootte, groep, indeling, initiaal, korteDatum, langeDatum, naamVan, personen } from "./opmaak";
   import type { ThemaId } from "./thema";
 
   let {
+    accounts,
     account,
-    afgemeld,
+    wisselAccount,
+    accountsGewijzigd,
     thema,
     kiesThema,
-  }: { account: Account; afgemeld: () => void; thema: ThemaId; kiesThema: (t: ThemaId) => void } = $props();
+  }: {
+    accounts: Account[];
+    account: string;
+    wisselAccount: (email: string) => void;
+    accountsGewijzigd: (lijst: Account[], kies?: string) => void;
+    thema: ThemaId;
+    kiesThema: (t: ThemaId) => void;
+  } = $props();
 
   let lijstMappen = $state<Map[]>([]);
   let huidigeMap = $state("INBOX");
@@ -36,11 +47,18 @@
   let ladenBericht = $state(false);
   let fout = $state("");
   let instellingenOpen = $state(false);
+  let openKop = $state<Kop | null>(null);
+  let opstellen = $state<Begin | null>(null);
+  let melding = $state("");
+  let bezigMetActie = $state(false);
 
   const ind = $derived(indeling(lijstMappen));
   const naamHuidig = $derived(lijstMappen.find((m) => m.pad === huidigeMap)?.naam ?? "Postvak IN");
   const ongelezenHuidig = $derived(lijstMappen.find((m) => m.pad === huidigeMap)?.ongelezen ?? 0);
   const mapNaam = (pad: string) => lijstMappen.find((m) => m.pad === pad)?.naam ?? pad;
+  // Bij Concepten het totaal (die zijn nooit "ongelezen"), elders het aantal ongelezen.
+  const teller = (m: Map) => (m.soort === "concepten" ? m.aantal : m.ongelezen);
+  const soortVan = (pad: string) => lijstMappen.find((m) => m.pad === pad)?.soort;
   const zichtbaar = $derived(resultaten ?? koppen);
   const bezigMetKlaarzetten = $derived(!resultaten && voortgang?.map === huidigeMap && voortgang.gedaan < voortgang.totaal ? voortgang : null);
   // Thema B: de vaste mappen als tabbladen, de rest in "Meer mappen".
@@ -97,7 +115,7 @@
   /** Haalt de bovenste `aantal` berichten opnieuw uit de lokale kopie (direct). */
   async function herlaad(aantal: number) {
     const map = huidigeMap;
-    const p = await poging(() => api.berichten(map, 0, aantal));
+    const p = await poging(() => api.berichten(account, map, 0, aantal));
     if (!p || map !== huidigeMap) return;
     totaal = p.totaal;
     klaar = p.klaar;
@@ -108,7 +126,7 @@
     if (laden || resultaten || koppen.length >= totaal) return;
     laden = true;
     const map = huidigeMap;
-    const p = await poging(() => api.berichten(map, koppen.length, STUK));
+    const p = await poging(() => api.berichten(account, map, koppen.length, STUK));
     laden = false;
     if (!p || map !== huidigeMap) return;
     totaal = p.totaal;
@@ -128,7 +146,7 @@
     if (!zoekterm.trim()) return wisZoeken();
     zoekTimer = setTimeout(async () => {
       const term = zoekterm;
-      const r = await poging(() => api.zoek(term));
+      const r = await poging(() => api.zoek(account, term));
       if (r && term === zoekterm) resultaten = r;
     }, 150);
   }
@@ -136,7 +154,7 @@
   async function zoekInTekst() {
     const term = zoekterm;
     zoekBezig = true;
-    const r = await poging(() => api.zoekInTekst(huidigeMap, term));
+    const r = await poging(() => api.zoekInTekst(account, huidigeMap, term));
     zoekBezig = false;
     if (r && term === zoekterm) {
       resultaten = r;
@@ -154,9 +172,154 @@
   async function kies(k: Kop) {
     gekozen = k.uid;
     ladenBericht = true;
-    const b = await poging(() => api.bericht(k.map, k.uid));
+    // Openen = gelezen, behalve in Concepten.
+    const markeer = !k.gelezen && soortVan(k.map) !== "concepten";
+    const b = await poging(() => api.bericht(account, k.map, k.uid, markeer));
     ladenBericht = false;
-    if (b && gekozen === k.uid) open = b;
+    if (b && gekozen === k.uid) {
+      open = b;
+      openKop = k;
+      if (markeer) zetGelezen(k, true);
+    }
+  }
+
+  function zetGelezen(k: Kop, gelezen: boolean) {
+    for (const lijst of [koppen, resultaten ?? []]) {
+      const x = lijst.find((y) => y.uid === k.uid && y.map === k.map);
+      if (x) x.gelezen = gelezen;
+    }
+  }
+
+  function toon(tekst: string) {
+    melding = tekst;
+    setTimeout(() => melding === tekst && (melding = ""), 5000);
+  }
+
+  /** Na verplaatsen of verwijderen: het volgende bericht in de lijst openen. */
+  function volgende(weg: Kop) {
+    const lijst = zichtbaar;
+    const i = lijst.findIndex((k) => k.uid === weg.uid && k.map === weg.map);
+    const filter = (l: Kop[]) => l.filter((k) => !(k.uid === weg.uid && k.map === weg.map));
+    koppen = filter(koppen);
+    if (resultaten) resultaten = filter(resultaten);
+    open = null;
+    openKop = null;
+    const daarna = filter(lijst)[i];
+    if (daarna) kies(daarna);
+    else gekozen = null;
+  }
+
+  async function actie(f: () => Promise<unknown>, k: Kop, klaar: string) {
+    bezigMetActie = true;
+    const ok = await poging(async () => (await f(), true));
+    bezigMetActie = false;
+    if (ok) {
+      volgende(k);
+      toon(klaar);
+    }
+  }
+
+  const archiveren = (k: Kop) =>
+    actie(() => api.archiveer(account, k.map, [[k.uid, k.datum]]), k, `Gearchiveerd in ${new Date(k.datum * 1000).getFullYear() || "Archief"}`);
+  const verwijderen = (k: Kop) => actie(() => api.verwijder(account, k.map, [k.uid]), k, "Naar de prullenbak verplaatst");
+
+  async function ongelezen(k: Kop) {
+    if (await poging(async () => (await api.markeer(account, k.map, [k.uid], false), true))) {
+      zetGelezen(k, false);
+      open = null;
+      openKop = null;
+      gekozen = null;
+    }
+  }
+
+  async function bijlageOpenen(k: Kop, i: number) {
+    await poging(() => api.bijlageOpenen(account, k.map, k.uid, i));
+  }
+
+  async function bijlageOpslaan(k: Kop, i: number, naam: string) {
+    const pad = await save({ defaultPath: naam, title: "Bijlage opslaan" });
+    if (pad && (await poging(async () => (await api.bijlageOpslaan(account, k.map, k.uid, i, pad), true)))) toon(`${naam} opgeslagen`);
+  }
+
+  // ── Schrijven ──────────────────────────────────────────────────────────
+  const esc = (t: string) => {
+    const d = document.createElement("div");
+    d.textContent = t;
+    return d.innerHTML;
+  };
+  /** HTML van een bericht zonder <style>-blokken, zodat het citaat de app niet beïnvloedt. */
+  function zonderStijl(html: string) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("style, meta, title, link").forEach((e) => e.remove());
+    return doc.body.innerHTML;
+  }
+  const inhoudAlsHtml = (b: Bericht) => (b.html ? zonderStijl(b.html) : esc(b.tekst).replace(/\n/g, "<br>"));
+  const adresTekst = (p: { naam: string; adres: string }) => (p.naam && p.naam !== p.adres ? `${p.naam} <${p.adres}>` : p.adres);
+  const metVoorvoegsel = (onderwerp: string, voor: string, al: RegExp) => (al.test(onderwerp) ? onderwerp : `${voor} ${onderwerp}`);
+
+  function leeg(): Begin {
+    return { aan: "", cc: "", onderwerp: "", html: "", isConcept: false, bijlagen_van: null, overgenomen: [], antwoord_op: null, in_reply_to: null, references: null, message_id: null };
+  }
+
+  function beantwoord(b: Bericht, k: Kop, allen: boolean) {
+    const eigen = new Set(accounts.map((a) => a.email.toLowerCase()));
+    const naar = (b.antwoord_aan.length ? b.antwoord_aan : b.van).filter((p) => !eigen.has(p.adres.toLowerCase()) || !allen);
+    const gezien = new Set(naar.map((p) => p.adres.toLowerCase()));
+    const kopie = allen
+      ? [...b.aan, ...b.cc].filter((p) => {
+          const a = p.adres.toLowerCase();
+          if (eigen.has(a) || gezien.has(a)) return false;
+          gezien.add(a);
+          return true;
+        })
+      : [];
+    opstellen = {
+      ...leeg(),
+      aan: naar.map(adresTekst).join(", "),
+      cc: kopie.map(adresTekst).join(", "),
+      onderwerp: metVoorvoegsel(b.onderwerp, "Re:", /^\s*(re|antw|aw)\s*:/i),
+      html: `<br><div>Op ${esc(langeDatum(b.datum))} schreef ${esc(personen(b.van))}:</div><blockquote style="margin:0 0 0 4px;padding-left:12px;border-left:2px solid #c8ccd4">${inhoudAlsHtml(b)}</blockquote>`,
+      antwoord_op: { map: k.map, uid: k.uid },
+      in_reply_to: b.message_id || null,
+      references: b.referenties || null,
+    };
+  }
+
+  function doorsturen(b: Bericht, k: Kop) {
+    const kop = [
+      "---------- Doorgestuurd bericht ----------",
+      `Van: ${personen(b.van)}`,
+      `Datum: ${langeDatum(b.datum)}`,
+      `Onderwerp: ${b.onderwerp}`,
+      `Aan: ${personen(b.aan)}`,
+      ...(b.cc.length ? [`Cc: ${personen(b.cc)}`] : []),
+    ];
+    opstellen = {
+      ...leeg(),
+      onderwerp: metVoorvoegsel(b.onderwerp, "Fwd:", /^\s*(fwd?|doorst|wg)\s*:/i),
+      html: `<br><div>${kop.map(esc).join("<br>")}</div><br>${inhoudAlsHtml(b)}`,
+      bijlagen_van: { map: k.map, uid: k.uid },
+      overgenomen: b.bijlagen.map((x) => x.naam),
+    };
+  }
+
+  function verderSchrijven(b: Bericht, k: Kop) {
+    opstellen = {
+      ...leeg(),
+      aan: b.aan.map(adresTekst).join(", "),
+      cc: b.cc.map(adresTekst).join(", "),
+      onderwerp: b.onderwerp,
+      html: b.html ? zonderStijl(b.html) : esc(b.tekst).replace(/\n/g, "<br>"),
+      isConcept: true,
+      bijlagen_van: b.bijlagen.length ? { map: k.map, uid: k.uid } : null,
+      overgenomen: b.bijlagen.map((x) => x.naam),
+      message_id: b.message_id || null,
+    };
+  }
+
+  function opstellenGesloten(tekst?: string) {
+    opstellen = null;
+    if (tekst) toon(tekst);
   }
 
   // Aantallen per map bijwerken, hooguit eens per 5 seconden.
@@ -165,29 +328,25 @@
     if (mappenTimer) return;
     mappenTimer = setTimeout(async () => {
       mappenTimer = undefined;
-      const m = await api.mappen().catch(() => null);
+      const m = await api.mappen(account).catch(() => null);
       if (m) lijstMappen = m;
     }, 5000);
   }
 
-  async function afmelden() {
-    instellingenOpen = false;
-    await poging(() => api.afmelden());
-    afgemeld();
-  }
 
   // Eenmalig bij het openen: mappen ophalen, lijst vullen en luisteren naar de achtergrondsynchronisatie.
   // `untrack`: anders zou dit opnieuw draaien telkens als huidigeMap of koppen verandert.
   $effect(() => untrack(() => {
-    poging(() => api.mappen()).then((m) => m && (lijstMappen = m));
+    poging(() => api.mappen(account)).then((m) => m && (lijstMappen = m));
     herlaad(STUK);
     const weg = [
-      listen<string>("map-gewijzigd", (e) => {
-        if (e.payload === huidigeMap) herlaad(Math.max(STUK, koppen.length));
+      listen<Gebeurtenis>("map-gewijzigd", (e) => {
+        if (e.payload.account !== account) return;
+        if (e.payload.map === huidigeMap) herlaad(Math.max(STUK, koppen.length));
         mappenBijwerken();
       }),
-      listen<Voortgang>("sync-voortgang", (e) => (voortgang = e.payload)),
-      listen<string>("sync-fout", (e) => (verbindingsfout = e.payload)),
+      listen<Voortgang>("sync-voortgang", (e) => e.payload.account === account && (voortgang = e.payload)),
+      listen<{ account: string; fout: string }>("sync-fout", (e) => e.payload.account === account && (verbindingsfout = e.payload.fout)),
     ];
     return () => weg.forEach((w) => w.then((f) => f()));
   }));
@@ -211,17 +370,36 @@
   <button type="button" class="map" class:actief={m.pad === huidigeMap} onclick={() => kiesMap(m.pad)}>
     {#if thema === "c"}<span class="stip" style="background: {STIPPEN[m.soort] ?? '#5b5f66'}" aria-hidden="true"></span>{/if}
     <span class="mapnaam">{m.naam}</span>
-    {#if m.ongelezen}<span class="teller">{m.ongelezen}</span>{/if}
+    {#if teller(m)}<span class="teller">{teller(m)}</span>{/if}
   </button>
 {/snippet}
 
-{#snippet acties()}
-  <button type="button" class:primair={thema === "b"} disabled title="Komt in stap 4">Beantwoorden</button>
-  {#if thema !== "b"}<button type="button" disabled title="Komt in stap 4">Allen beantwoorden</button>{/if}
-  <button type="button" disabled title="Komt in stap 4">Doorsturen</button>
+{#snippet acties(b: Bericht, k: Kop)}
+  {#if soortVan(k.map) === "concepten"}
+    <button type="button" class="primair" onclick={() => verderSchrijven(b, k)}>Verder schrijven</button>
+  {:else}
+    <button type="button" class:primair={thema === "b"} onclick={() => beantwoord(b, k, false)}>Beantwoorden</button>
+    <button type="button" onclick={() => beantwoord(b, k, true)}>Allen beantwoorden</button>
+    <button type="button" onclick={() => doorsturen(b, k)}>Doorsturen</button>
+  {/if}
   <div class="ruimte"></div>
-  <button type="button" class="zacht-accent" disabled title="Komt in stap 4"><Pictogram naam="archief" /> Archiveren</button>
-  <button type="button" disabled title="Komt in stap 4" aria-label="Verwijderen"><Pictogram naam="prullenbak" /></button>
+  {#if thema !== "b"}<button type="button" onclick={() => ongelezen(k)} title="Markeer als ongelezen">Ongelezen</button>{/if}
+  {#if !["archief", "prullenbak", "concepten"].includes(soortVan(k.map) ?? "") && !/^archive/i.test(k.map)}
+    <button type="button" class="zacht-accent" disabled={bezigMetActie} onclick={() => archiveren(k)}><Pictogram naam="archief" /> Archiveren</button>
+  {/if}
+  {#if soortVan(k.map) !== "prullenbak"}
+    <button type="button" disabled={bezigMetActie} onclick={() => verwijderen(k)} aria-label="Verwijderen" title="Naar de prullenbak"><Pictogram naam="prullenbak" /></button>
+  {/if}
+{/snippet}
+
+{#snippet accountkeuze()}
+  {#if accounts.length > 1}
+    <select class="accountkeuze" value={account} onchange={(e) => wisselAccount(e.currentTarget.value)} aria-label="Mailadres">
+      {#each accounts as a (a.email)}<option value={a.email}>{a.email}</option>{/each}
+    </select>
+  {:else}
+    {account}
+  {/if}
 {/snippet}
 
 <div class="app thema-{thema}">
@@ -231,7 +409,7 @@
       {#if thema === "b"}
         <nav class="tabs" aria-label="Mappen">
           {#each tabs as m (m.pad)}
-            <button type="button" class="tab" class:actief={m.pad === huidigeMap} onclick={() => kiesMap(m.pad)}>{m.naam}</button>
+            <button type="button" class="tab" class:actief={m.pad === huidigeMap} onclick={() => kiesMap(m.pad)}>{m.naam}{#if teller(m)} <span class="teller">{teller(m)}</span>{/if}</button>
           {/each}
           <label class="tab meer" class:actief={meerGekozen}>
             <span class="verborgen">Meer mappen</span>
@@ -245,13 +423,14 @@
           </label>
         </nav>
       {/if}
+      {#if thema === "b" && accounts.length > 1}{@render accountkeuze()}{/if}
       {#if thema === "a"}{@render zoekveld()}{/if}
       <div class="ruimte"></div>
       {#if thema === "b"}{@render zoekveld()}{/if}
       <button type="button" class="pictoknop" aria-label="Instellingen" title="Instellingen" onclick={() => (instellingenOpen = true)}>
         <Pictogram naam="instellingen" maat={thema === "b" ? 22 : 18} />
       </button>
-      <button class="primair" type="button" disabled title="Komt in stap 4"><Pictogram naam="plus" /> Nieuwe mail</button>
+      <button class="primair" type="button" onclick={() => (opstellen = leeg())}><Pictogram naam="plus" /> Nieuwe mail</button>
     </header>
   {/if}
 
@@ -262,9 +441,9 @@
           <div class="merk-c">
             <span class="verf" aria-hidden="true"><span></span><span></span><span></span></span> Pro-Art Mail
           </div>
-          <button class="primair" type="button" disabled title="Komt in stap 4">Nieuwe mail</button>
+          <button class="primair" type="button" onclick={() => (opstellen = leeg())}>Nieuwe mail</button>
         {/if}
-        <div class="kopje eerste">{account.email}</div>
+        <div class="kopje eerste">{@render accountkeuze()}</div>
         {#each ind.vast as m (m.pad)}{@render mapknop(m)}{/each}
         {#if ind.jaren.length}
           <div class="kopje">Archief per jaar</div>
@@ -347,7 +526,7 @@
     <main class="lezen">
       {#if fout}<p class="fout" role="alert">{fout}</p>{/if}
       {#if open}
-        {#if thema !== "b"}<div class="acties boven">{@render acties()}</div>{/if}
+        {#if thema !== "b" && openKop}<div class="acties boven">{@render acties(open, openKop)}</div>{/if}
         <div class="rol-lezen">
           <article class="bericht">
             <h1>{open.onderwerp || "(geen onderwerp)"}</h1>
@@ -364,14 +543,21 @@
             {#if open.bijlagen.length}
               <ul class="bijlagen">
                 {#each open.bijlagen as b, i (i)}
-                  <li><Pictogram naam="bijlage" maat={14} /> {b.naam} <span class="zacht">({grootte(b.grootte)})</span></li>
+                  <li>
+                    <button type="button" class="bijlage" onclick={() => openKop && bijlageOpenen(openKop, i)} title="Openen">
+                      <Pictogram naam="bijlage" maat={14} /> {b.naam} <span class="zacht">({grootte(b.grootte)})</span>
+                    </button>
+                    <button type="button" class="opslaan" onclick={() => openKop && bijlageOpslaan(openKop, i, b.naam)} aria-label="{b.naam} opslaan" title="Opslaan als…">
+                      <Pictogram naam="omlaag" maat={14} />
+                    </button>
+                  </li>
                 {/each}
               </ul>
             {/if}
             <div class="papier"><Inhoud html={open.html} tekst={open.tekst} /></div>
           </article>
         </div>
-        {#if thema === "b"}<div class="acties onder">{@render acties()}</div>{/if}
+        {#if thema === "b" && openKop}<div class="acties onder">{@render acties(open, openKop)}</div>{/if}
       {:else if ladenBericht}
         <p class="melding">Bericht openen…</p>
       {:else}
@@ -382,8 +568,14 @@
 </div>
 
 {#if instellingenOpen}
-  <Instellingen {thema} kies={kiesThema} email={account.email} {afmelden} sluit={() => (instellingenOpen = false)} />
+  <Instellingen {thema} kies={kiesThema} {accounts} {accountsGewijzigd} sluit={() => (instellingenOpen = false)} />
 {/if}
+
+{#if opstellen}
+  <Opstellen {accounts} {account} begin={opstellen} sluit={opstellenGesloten} />
+{/if}
+
+{#if melding}<div class="melding-onder" role="status">{melding}</div>{/if}
 
 <style>
   /* ── Gemeenschappelijk (thema A is de basis) ───────────────────────── */
@@ -778,6 +970,49 @@
     padding: 8px 12px;
     border: 1px solid var(--rand);
     border-radius: var(--radius);
+  }
+  .bijlagen li {
+    padding: 0;
+    overflow: hidden;
+  }
+  .bijlagen .bijlage,
+  .bijlagen .opslaan {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+  }
+  .bijlagen .opslaan {
+    padding: 0 10px;
+    border-left: 1px solid var(--rand);
+    color: var(--tekst-zacht);
+  }
+  .bijlagen button:hover {
+    background: var(--rand-licht);
+  }
+  .accountkeuze {
+    max-width: 100%;
+    padding: 4px 6px;
+    border: 1px solid var(--rand);
+    border-radius: 6px;
+    background: var(--knop);
+    color: var(--tekst);
+    font-size: 13px;
+  }
+  .melding-onder {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    translate: -50% 0;
+    z-index: 20;
+    padding: 12px 20px;
+    border-radius: 10px;
+    background: var(--tekst);
+    color: var(--achtergrond);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
   }
   .papier {
     background: var(--papier);

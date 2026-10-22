@@ -111,6 +111,11 @@ Een eigen email programma/app in eigen styl
 - Lokaal een ondertekende release bouwen (test): sleutel in `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` zetten, dan
   `npx tauri build --bundles appimage` (~2 min, AppImage ~88 MB).
 
+## Volgende stappen (stand 2026-10-22)
+- Uitrollen op de andere pc's: 2 kassa's en de laptop in de lijstenmakerij (.exe), de Zorin-pc (AppImage; libfuse2 nodig?).
+- Vóór eM Client weg kan: nagaan of eM Client **lokale mappen of contacten** heeft die niet op de server staan.
+- Ondertekeningen: Robert overlegt nog in de winkel.
+
 ## Ideeën voor later
 - "Verzonden" als samengevoegde weergave van `Sent` + `Sent Messages` (zolang webmail en eM Client naast de app gebruikt worden).
 
@@ -121,4 +126,4 @@ Een eigen email programma/app in eigen styl
 4. ✅ (2026-10-22, getest door Robert: versturen, beantwoorden, bijlagen, archiveren, verwijderen, concepten, ondertekening; gepusht) Beantwoorden/allen/doorsturen/nieuw, concepten, ondertekeningen,
    bijlagen openen/opslaan/toevoegen, gelezen/ongelezen, archiveren, verwijderen, **meerdere accounts**.
 5. ✅ (opgezet 2026-10-22) Windows-installatie + automatische updates via GitHub (`roppunt/pro-art-mail`, **openbaar**).
-   **v0.1.0 uitgebracht 2026-10-22** (bouw ~10 min; .exe 4 MB, AppImage 81 MB, .deb 6 MB). Nog: proefdraaien op de kantoor-pc.
+   **v0.1.0 uitgebracht 2026-10-22** (bouw ~10 min; .exe 4 MB, AppImage 81 MB, .deb 6 MB). **Draait sinds 2026-10-22 op de kantoor-pc (Acer XC-840): werkt goed en snel (Robert).**

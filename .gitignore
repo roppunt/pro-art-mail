@@ -11,3 +11,6 @@ vite.config.ts.timestamp-*
 
 # Winkel- en netwerkgegevens (repository is openbaar)
 /lokaal/
+
+# Reservekopieen
+*.bak-*

@@ -1,0 +1,57 @@
+# Nieuwe versie uitbrengen: versie ophogen in package.json, dan `git tag v0.2.0 && git push --tags`.
+# GitHub bouwt de installatiebestanden (Windows .exe, Linux AppImage/.deb), ondertekent de updates
+# en zet alles in een release. De apps in de winkel vinden die via latest.json en werken zichzelf bij.
+name: Uitbrengen
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bouwen:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+          # Ubuntu 22.04: zelfde basis als Zorin OS 17, zodat de Linux-versie daar draait.
+          - platform: ubuntu-22.04
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux-pakketten
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Pro-Art Mail __VERSION__
+          releaseBody: Nieuwe versie van Pro-Art Mail. Geïnstalleerde apps werken zichzelf bij.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

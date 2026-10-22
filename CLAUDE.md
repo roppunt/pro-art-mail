@@ -95,6 +95,22 @@ Een eigen email programma/app in eigen styl
   npm run check                                # Svelte/TypeScript controleren
   ```
 
+## Uitbrengen en updates (stap 5, opgezet 2026-10-22)
+- **Nieuwe versie:** versie ophogen in `package.json` (tauri.conf.json leest die), committen, dan
+  `git tag v0.x.y && git push origin main --tags`. GitHub Actions (`.github/workflows/uitbrengen.yml`, tauri-action) bouwt op
+  `windows-latest` (NSIS `.exe`, per gebruiker, Nederlands) en `ubuntu-22.04` (AppImage + `.deb`; 22.04 = basis van Zorin 17)
+  en zet alles met `latest.json` in een GitHub-release.
+- **Automatische updates:** `tauri-plugin-updater`; de app kijkt bij het starten naar
+  `https://github.com/roppunt/pro-art-mail/releases/latest/download/latest.json`, installeert en herstart (`src/lib/bijwerken.ts`).
+  Windows: installMode `passive`. Linux: alleen de **AppImage** werkt zichzelf bij (niet de .deb).
+- ⚠️ **Ondertekensleutel voor updates:** `~/.tauri/pro-art-mail.key` + `.key.wachtwoord` (600) op ai-ubuntu, en als GitHub-secrets
+  `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`. Publieke sleutel staat in `tauri.conf.json`. **Kwijt = bestaande installaties
+  krijgen geen updates meer** → Robert bewaart beide ook in zijn wachtwoordbeheerder.
+- Geen code-certificaat: Windows toont bij de eerste installatie "Windows heeft uw pc beschermd" → *Meer info* → *Toch uitvoeren*.
+- Pictogram: `ontwerp/pictogram.svg` (envelop + drie verfstrepen), omgezet met `npx tauri icon ontwerp/pictogram.svg`.
+- Lokaal een ondertekende release bouwen (test): sleutel in `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` zetten, dan
+  `npx tauri build --bundles appimage` (~2 min, AppImage ~88 MB).
+
 ## Ideeën voor later
 - "Verzonden" als samengevoegde weergave van `Sent` + `Sent Messages` (zolang webmail en eM Client naast de app gebruikt worden).
 
@@ -104,4 +120,5 @@ Een eigen email programma/app in eigen styl
 3. ✅ (2026-10-22, goedgekeurd, gepusht; tekstzoeken op de server < 1 s) Zoeken en snel bladeren (lokale SQLite-kopie), vloeiend scrollen, IDLE.
 4. ✅ (2026-10-22, getest door Robert: versturen, beantwoorden, bijlagen, archiveren, verwijderen, concepten, ondertekening; gepusht) Beantwoorden/allen/doorsturen/nieuw, concepten, ondertekeningen,
    bijlagen openen/opslaan/toevoegen, gelezen/ongelezen, archiveren, verwijderen, **meerdere accounts**.
-5. Windows-installatie + automatische updates via GitHub (`roppunt/pro-art-mail`, **openbaar**, besluit Robert), proefdraaien op KANTOOR.
+5. ✅ (opgezet 2026-10-22) Windows-installatie + automatische updates via GitHub (`roppunt/pro-art-mail`, **openbaar**).
+   Nog: proefdraaien op de kantoor-pc naast eM Client.

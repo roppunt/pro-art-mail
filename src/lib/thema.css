@@ -1,0 +1,54 @@
+/* Thema A — rustig en vertrouwd (ontwerp A op het canvas). Thema B en C volgen in stap 2
+   als extra blokken [data-thema="b"] / [data-thema="c"] met dezelfde variabelen. */
+:root,
+[data-thema="a"] {
+  --achtergrond: #f4f5f7;
+  --vlak: #ffffff;
+  --rand: #e3e6eb;
+  --rand-licht: #eef0f3;
+  --tekst: #1d2433;
+  --tekst-zacht: #5b6475;
+  --tekst-mappen: #3a4252;
+  --accent: #1f4e8c;
+  --accent-tekst: #ffffff;
+  --accent-zacht: #e8eef7;
+  --gekozen: #eef3fa;
+  --map-actief: #e3e9f2;
+  --invoer: #f0f2f5;
+  --fout: #b42318;
+  --fout-zacht: #fef3f2;
+  --letter: "Inter Variable", system-ui, sans-serif;
+  --radius: 8px;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--achtergrond);
+  color: var(--tekst);
+  font-family: var(--letter);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

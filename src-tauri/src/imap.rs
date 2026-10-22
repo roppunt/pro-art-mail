@@ -1,7 +1,9 @@
 //! Verbinding met de IMAP-server. Stap 1: alleen lezen — mappen worden met EXAMINE geopend
 //! en berichten met BODY.PEEK opgehaald, zodat er op de server niets verandert (ook niet gelezen/ongelezen).
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_imap::types::{Flag, NameAttribute};
@@ -9,12 +11,13 @@ use async_imap::Session;
 use futures::TryStreamExt;
 use serde::Serialize;
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
 
-use crate::mail;
+use crate::{cache, mail};
 
 pub type ImapSessie = Session<TlsStream<TcpStream>>;
 
@@ -22,7 +25,6 @@ pub struct Verbinding {
     sessie: ImapSessie,
     /// Welke map nu met EXAMINE open staat, om niet bij elke opdracht opnieuw te openen.
     open_map: Option<String>,
-    aantal: u32,
 }
 
 #[derive(Serialize, Clone)]
@@ -38,11 +40,6 @@ pub struct Map {
     pub ongelezen: u32,
 }
 
-#[derive(Serialize)]
-pub struct Pagina {
-    pub totaal: u32,
-    pub berichten: Vec<mail::Kop>,
-}
 
 pub async fn verbind(host: &str, poort: u16, gebruiker: &str, wachtwoord: &str) -> Result<Verbinding> {
     let mut wortels = RootCertStore::empty();
@@ -65,7 +62,7 @@ pub async fn verbind(host: &str, poort: u16, gebruiker: &str, wachtwoord: &str) 
         }
         e => anyhow!(e).context("Inloggen mislukt"),
     })?;
-    Ok(Verbinding { sessie, open_map: None, aantal: 0 })
+    Ok(Verbinding { sessie, open_map: None })
 }
 
 impl Verbinding {
@@ -94,7 +91,6 @@ impl Verbinding {
                 _ => kort,
             };
             let st = self.sessie.status(&pad, "(MESSAGES UNSEEN)").await?;
-            eprintln!("map {pad}: {} berichten, {} ongelezen", st.exists, st.unseen.unwrap_or(0));
             uit.push(Map { pad, naam, soort: soort.into(), scheiding, aantal: st.exists, ongelezen: st.unseen.unwrap_or(0) });
         }
         // Dubbele vaste mappen (bv. `Sent` én `Sent Messages`, door verschillende mailprogramma's
@@ -113,50 +109,112 @@ impl Verbinding {
         Ok(uit)
     }
 
-    async fn open(&mut self, map: &str) -> Result<()> {
+    /// Opent een map alleen-lezen (EXAMINE). Geeft (UIDVALIDITY, aantal berichten).
+    pub async fn open(&mut self, map: &str) -> Result<(u32, u32)> {
+        let mb = self.sessie.examine(map).await.with_context(|| format!("Kan map {map} niet openen"))?;
+        self.open_map = Some(map.to_string());
+        Ok((mb.uid_validity.unwrap_or(0), mb.exists))
+    }
+
+    async fn zorg_open(&mut self, map: &str) -> Result<()> {
         if self.open_map.as_deref() != Some(map) {
-            let mb = self.sessie.examine(map).await.with_context(|| format!("Kan map {map} niet openen"))?;
-            self.aantal = mb.exists;
-            self.open_map = Some(map.to_string());
-        } else {
-            // Even vragen of er nieuwe mail is; NOOP werkt het aantal bij.
-            self.sessie.noop().await?;
-            let mb = self.sessie.examine(map).await?;
-            self.aantal = mb.exists;
+            self.open(map).await?;
         }
         Ok(())
     }
 
-    /// Een pagina koppen, nieuwste eerst. Pagina 0 = de nieuwste `per_pagina` berichten.
-    pub async fn berichten(&mut self, map: &str, pagina: u32, per_pagina: u32) -> Result<Pagina> {
-        self.open(map).await?;
-        let totaal = self.aantal;
-        if totaal == 0 || pagina * per_pagina >= totaal {
-            return Ok(Pagina { totaal, berichten: vec![] });
-        }
-        let hoog = totaal - pagina * per_pagina;
-        let laag = hoog.saturating_sub(per_pagina - 1).max(1);
+    /// Alle selecteerbare mappen, zonder verdere gegevens (voor het bijwerken van de kopie).
+    pub async fn mappaden(&mut self) -> Result<Vec<String>> {
+        let namen: Vec<_> = self.sessie.list(Some(""), Some("*")).await?.try_collect().await?;
+        Ok(namen
+            .iter()
+            .filter(|n| !n.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)))
+            .map(|n| n.name().to_string())
+            .collect())
+    }
+
+    /// UID en vlaggen van alle berichten in de open map. Ook de manier om te zien welke berichten
+    /// er niet meer zijn (ongeveer 35 bytes per bericht, dus ~1 MB voor 27.000 berichten).
+    pub async fn alle_vlaggen(&mut self) -> Result<HashMap<u32, cache::Vlaggen>> {
+        let fetches: Vec<_> = self.sessie.uid_fetch("1:*", "(UID FLAGS)").await?.try_collect().await?;
+        Ok(fetches
+            .iter()
+            .filter_map(|f| {
+                let gelezen = f.flags().any(|v| matches!(v, Flag::Seen));
+                let beantwoord = f.flags().any(|v| matches!(v, Flag::Answered));
+                Some((f.uid?, (gelezen, beantwoord)))
+            })
+            .collect())
+    }
+
+    /// Kopregels van de gegeven UID's (alleen de velden die de lijst nodig heeft).
+    pub async fn koppen(&mut self, map: &str, uids: &[u32]) -> Result<Vec<mail::Kop>> {
+        self.zorg_open(map).await?;
         let fetches: Vec<_> = self
             .sessie
-            .fetch(format!("{laag}:{hoog}"), "(UID FLAGS RFC822.SIZE BODY.PEEK[HEADER])")
+            .uid_fetch(
+                uid_reeks(uids),
+                "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE CONTENT-TYPE)])",
+            )
             .await?
             .try_collect()
             .await?;
-        let mut koppen: Vec<mail::Kop> = fetches
+        Ok(fetches
             .iter()
             .filter_map(|f| {
-                let uid = f.uid?;
                 let gelezen = f.flags().any(|v| matches!(v, Flag::Seen));
                 let beantwoord = f.flags().any(|v| matches!(v, Flag::Answered));
-                Some(mail::kop(uid, f.message, gelezen, beantwoord, f.size.unwrap_or(0), f.header()?))
+                let mut k = mail::kop(map, f.uid?, gelezen, beantwoord, f.size.unwrap_or(0), f.header()?);
+                if k.datum <= 0 {
+                    // Geen (geldige) Date-kopregel: dan de ontvangstdatum van de server.
+                    k.datum = f.internal_date().map(|d| d.timestamp()).unwrap_or(0);
+                }
+                Some(k)
             })
-            .collect();
-        koppen.sort_by(|a, b| b.volgnummer.cmp(&a.volgnummer));
-        Ok(Pagina { totaal, berichten: koppen })
+            .collect())
+    }
+
+    /// Laat de server zoeken in de volledige tekst van de berichten in één map.
+    pub async fn zoek_tekst(&mut self, map: &str, tekst: &str) -> Result<Vec<u32>> {
+        self.zorg_open(map).await?;
+        let mut voorwaarden = Vec::new();
+        for woord in tekst.split_whitespace() {
+            let schoon: String = woord.chars().filter(|c| !c.is_control() && *c != '"' && *c != '\\').collect();
+            if !schoon.is_empty() {
+                voorwaarden.push(format!("TEXT \"{schoon}\""));
+            }
+        }
+        if voorwaarden.is_empty() {
+            return Ok(vec![]);
+        }
+        let uids = self.sessie.uid_search(format!("CHARSET UTF-8 {}", voorwaarden.join(" "))).await?;
+        Ok(uids.into_iter().collect())
+    }
+
+    /// Wacht (IDLE) op nieuws in de open map, tot `max` verstreken is of `signaal` komt.
+    /// Geeft de verbinding daarna terug; IDLE neemt hem tijdelijk over.
+    pub async fn wacht(self, signaal: &Notify, max: Duration) -> Result<Self> {
+        let open_map = self.open_map;
+        let mut handle = self.sessie.idle();
+        handle.init().await?;
+        {
+            let (klaar, stop) = handle.wait_with_timeout(max);
+            tokio::pin!(klaar);
+            let mut stop = Some(stop);
+            tokio::select! {
+                r = &mut klaar => { r?; }
+                _ = signaal.notified() => {
+                    drop(stop.take());
+                    klaar.await?;
+                }
+            }
+        }
+        let sessie = handle.done().await?;
+        Ok(Verbinding { sessie, open_map })
     }
 
     pub async fn bericht(&mut self, map: &str, uid: u32) -> Result<mail::Bericht> {
-        self.open(map).await?;
+        self.zorg_open(map).await?;
         let fetches: Vec<_> = self.sessie.uid_fetch(uid.to_string(), "(UID FLAGS BODY.PEEK[])").await?.try_collect().await?;
         let f = fetches.first().ok_or_else(|| anyhow!("Bericht niet gevonden (misschien verplaatst)"))?;
         let ruw = f.body().ok_or_else(|| anyhow!("Leeg bericht"))?;
@@ -189,5 +247,31 @@ fn soort_van(pad: &str, kort: &str, attr: &[NameAttribute<'_>]) -> &'static str 
         "junk" | "spam" | "ongewenste e-mail" => "spam",
         "trash" | "deleted items" | "deleted messages" | "prullenbak" | "verwijderde items" => "prullenbak",
         _ => "gewoon",
+    }
+}
+
+/// Maakt van UID's een compacte reeks voor IMAP: [1,2,3,7,9,10] → "1:3,7,9:10".
+fn uid_reeks(uids: &[u32]) -> String {
+    let mut v = uids.to_vec();
+    v.sort_unstable();
+    let mut delen = Vec::new();
+    let mut i = 0;
+    while i < v.len() {
+        let begin = v[i];
+        while i + 1 < v.len() && v[i + 1] == v[i] + 1 {
+            i += 1;
+        }
+        delen.push(if begin == v[i] { begin.to_string() } else { format!("{begin}:{}", v[i]) });
+        i += 1;
+    }
+    delen.join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn uid_reeks() {
+        assert_eq!(super::uid_reeks(&[9, 1, 2, 3, 7, 10]), "1:3,7,9:10");
+        assert_eq!(super::uid_reeks(&[5]), "5");
     }
 }

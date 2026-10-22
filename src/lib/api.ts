@@ -13,8 +13,8 @@ export type Map = {
 };
 
 export type Kop = {
+  map: string;
   uid: number;
-  volgnummer: number;
   van_naam: string;
   van_adres: string;
   onderwerp: string;
@@ -25,7 +25,8 @@ export type Kop = {
   bijlage: boolean;
 };
 
-export type Pagina = { totaal: number; berichten: Kop[] };
+export type Pagina = { totaal: number; klaar: boolean; berichten: Kop[] };
+export type Voortgang = { map: string; gedaan: number; totaal: number };
 
 export type Persoon = { naam: string; adres: string };
 export type Bijlage = { naam: string; grootte: number; soort: string };
@@ -45,5 +46,7 @@ export const huidigAccount = () => invoke<Account | null>("huidig_account");
 export const inloggen = (email: string, wachtwoord: string) => invoke<Account>("inloggen", { email, wachtwoord });
 export const afmelden = () => invoke<void>("afmelden");
 export const mappen = () => invoke<Map[]>("mappen");
-export const berichten = (map: string, pagina: number) => invoke<Pagina>("berichten", { map, pagina });
+export const berichten = (map: string, vanaf: number, aantal: number) => invoke<Pagina>("berichten", { map, vanaf, aantal });
+export const zoek = (zoekterm: string) => invoke<Kop[]>("zoek", { zoekterm });
+export const zoekInTekst = (map: string, zoekterm: string) => invoke<Kop[]>("zoek_in_tekst", { map, zoekterm });
 export const bericht = (map: string, uid: number) => invoke<Bericht>("bericht", { map, uid });

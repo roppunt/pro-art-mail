@@ -8,7 +8,8 @@ Een eigen email programma/app in eigen styl
 - Houd deze CLAUDE.md bij: wat het project doet, hoe het draait, waar het staat en wat er nog open is.
 - Staat onder Syncthing (PC ↔ NAS ↔ laptop); virtualenvs en `node_modules` worden genegeerd.
 - **Openbare repository** https://github.com/roppunt/pro-art-mail. Geen wachtwoorden, IP-adressen of winkelgegevens in git:
-  die horen in `lokaal/` (gitignored). De Stop-hook `~/.claude/auto-sync.sh` commit automatisch na elke beurt (pusht niet).
+  die horen in `lokaal/` (gitignored). De Stop-hook `~/.claude/auto-sync.sh` commit automatisch na elke beurt (pusht niet). Per afgeronde stap: auto-sync-commits
+  samenvoegen (`git reset --soft origin/main` + nette commit), scannen op IP-adressen/sleutels, dan `git push` (gh is gekoppeld via `gh auth setup-git`).
 
 ## Besluiten tot nu toe (2026-10-22)
 - **Voor de winkel**, niet voor Robert privé. De winkel heeft een **eigen mailserver** (geen Gmail) → IMAP/SMTP.
@@ -46,8 +47,17 @@ Een eigen email programma/app in eigen styl
   - `imap.rs` — `async-imap` + `tokio-rustls` (ring, webpki-roots). **Stap 1 = alleen lezen**: mappen met `EXAMINE`,
     berichten met `BODY.PEEK`, dus niets verandert op de server (ook gelezen/ongelezen niet).
   - `mail.rs` — ontleden met `mail-parser`, HTML opschonen met `ammonia` (scripts/formulieren weg, inline stijlen blijven).
-  - `lib.rs` — Tauri-opdrachten `huidig_account`, `inloggen`, `afmelden`, `mappen`, `berichten` (50 per pagina, nieuwste
-    eerst), `bericht`. `mappen` doet STATUS per map (aantal/ongelezen) en maakt van dubbele vaste mappen (bv. `Sent` + `Sent Messages`)
+  - `cache.rs` — **lokale kopie** van de kopregels (SQLite via `rusqlite` bundled, `kopie.sqlite` in de app-datamap, ~6 MB
+    voor ~33.600 berichten). Tabellen `mappen` (pad, uidvalidity, klaar) en `koppen` (map, uid, afzender, onderwerp, datum,
+    vlaggen, kolom `zoek` = kleine letters voor LIKE-zoeken, ~4 ms). Alleen een kopie: weggooien mag, wordt opnieuw opgebouwd.
+    Bij afmelden gewist.
+  - `sync.rs` — **achtergrondverbinding** (tweede IMAP-login): eerst de map met voorrang (waar de gebruiker naar kijkt), dan
+    INBOX, dan alle mappen (eerste keer, daarna elk kwartier). Per map: `UID FETCH 1:* (FLAGS)` → verwijderd/gewijzigd/nieuw;
+    nieuwe kopregels in stukken van 500 met `BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE CONTENT-TYPE)]` + INTERNALDATE
+    (terugval als Date ontbreekt). Daarna IDLE op INBOX (max 10 min). Events naar de interface: `map-gewijzigd`,
+    `sync-voortgang`, `sync-fout`. Eerste volledige opbouw op ai-ubuntu: < 1 minuut.
+  - `lib.rs` — Tauri-opdrachten `huidig_account`, `inloggen`, `afmelden`, `mappen`, `berichten` (uit de kopie, `vanaf`/`aantal`),
+    `zoek` (kopie, alle mappen), `zoek_in_tekst` (IMAP `UID SEARCH TEXT` op de server, één map), `bericht`. `mappen` doet STATUS per map (aantal/ongelezen) en maakt van dubbele vaste mappen (bv. `Sent` + `Sent Messages`)
     alleen de volste "Verzonden"; de andere blijft zichtbaar onder zijn eigen naam. Eén IMAP-verbinding, bij een fout één keer opnieuw verbinden (macro `met_verbinding!`).
 - Interface (`src/`): `routes/+page.svelte` (inloggen of hoofdscherm, laadt lettertypen en thema), `lib/Hoofd.svelte`
   (alle drie de indelingen: A drie kolommen, B tabbladen + knoppen onderaan, C donker; klassen `.thema-a/b/c`),
@@ -69,8 +79,8 @@ Een eigen email programma/app in eigen styl
 
 ## Stappenplan
 1. ✅ Basis: verbinden, mappen, postvak IN, bericht lezen (alleen lezen). Getest door Robert op ai-ubuntu 2026-10-22: inloggen werkt, mails zichtbaar.
-2. ✅ (gebouwd 2026-10-22, wacht op oordeel Robert) De drie thema's (A/B/C) + keuze in Instellingen, per pc onthouden.
-3. Zoeken en snel bladeren (lokale SQLite-kopie).
+2. ✅ (2026-10-22, goedgekeurd door Robert, gepusht) De drie thema's (A/B/C) + keuze in Instellingen, per pc onthouden.
+3. ✅ (2026-10-22, goedgekeurd, gepusht; tekstzoeken op de server < 1 s) Zoeken en snel bladeren (lokale SQLite-kopie), vloeiend scrollen, IDLE.
 4. Beantwoorden/doorsturen/nieuw (SMTP 465, `lettre`), gelezen markeren, archiveren (?), verwijderen. Verzonden opslaan in de
    map die eM Client gebruikt.
 5. Windows-installatie + automatische updates via GitHub (`roppunt/pro-art-mail`, **openbaar**, besluit Robert), proefdraaien op KANTOOR.

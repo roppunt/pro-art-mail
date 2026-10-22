@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { listen } from "@tauri-apps/api/event";
+  import { untrack } from "svelte";
   import * as api from "./api";
-  import type { Account, Bericht, Kop, Map } from "./api";
+  import type { Account, Bericht, Kop, Map, Voortgang } from "./api";
   import Inhoud from "./Inhoud.svelte";
   import Instellingen from "./Instellingen.svelte";
   import Pictogram from "./Pictogram.svelte";
@@ -18,8 +20,17 @@
   let huidigeMap = $state("INBOX");
   let koppen = $state<Kop[]>([]);
   let totaal = $state(0);
-  let pagina = $state(0);
+  let klaar = $state(true);
   let laden = $state(false);
+  let voortgang = $state<Voortgang | null>(null);
+  let verbindingsfout = $state("");
+  // Zoeken: null = gewone lijst; anders de resultaten.
+  let zoekterm = $state("");
+  let resultaten = $state<Kop[] | null>(null);
+  let inTekstGezocht = $state(false);
+  let zoekBezig = $state(false);
+  let rollen = $state<HTMLDivElement>();
+  const STUK = 100;
   let gekozen = $state<number | null>(null);
   let open = $state<Bericht | null>(null);
   let ladenBericht = $state(false);
@@ -29,6 +40,9 @@
   const ind = $derived(indeling(lijstMappen));
   const naamHuidig = $derived(lijstMappen.find((m) => m.pad === huidigeMap)?.naam ?? "Postvak IN");
   const ongelezenHuidig = $derived(lijstMappen.find((m) => m.pad === huidigeMap)?.ongelezen ?? 0);
+  const mapNaam = (pad: string) => lijstMappen.find((m) => m.pad === pad)?.naam ?? pad;
+  const zichtbaar = $derived(resultaten ?? koppen);
+  const bezigMetKlaarzetten = $derived(!resultaten && voortgang?.map === huidigeMap && voortgang.gedaan < voortgang.totaal ? voortgang : null);
   // Thema B: de vaste mappen als tabbladen, de rest in "Meer mappen".
   const tabs = $derived(ind.vast.filter((m) => ["inbox", "verzonden", "concepten", "archief"].includes(m.soort)));
   const meerMappen = $derived([...ind.vast.filter((m) => !tabs.includes(m)), ...ind.jaren, ...ind.overig]);
@@ -36,7 +50,7 @@
   // Koppen per groep (Vandaag, Gisteren, …), in volgorde.
   const groepen = $derived.by(() => {
     const uit: { titel: string; koppen: Kop[] }[] = [];
-    for (const k of koppen) {
+    for (const k of zichtbaar) {
       const t = groep(k.datum);
       if (uit.at(-1)?.titel !== t) uit.push({ titel: t, koppen: [] });
       uit.at(-1)!.koppen.push(k);
@@ -71,34 +85,89 @@
   }
 
   async function kiesMap(pad: string) {
+    wisZoeken();
     huidigeMap = pad;
-    pagina = 0;
     koppen = [];
     gekozen = null;
     open = null;
-    await laadPagina();
+    rollen?.scrollTo(0, 0);
+    await herlaad(STUK);
   }
 
-  async function laadPagina() {
-    laden = true;
-    const p = await poging(() => api.berichten(huidigeMap, pagina));
-    laden = false;
-    if (!p) return;
+  /** Haalt de bovenste `aantal` berichten opnieuw uit de lokale kopie (direct). */
+  async function herlaad(aantal: number) {
+    const map = huidigeMap;
+    const p = await poging(() => api.berichten(map, 0, aantal));
+    if (!p || map !== huidigeMap) return;
     totaal = p.totaal;
-    koppen = pagina === 0 ? p.berichten : [...koppen, ...p.berichten];
+    klaar = p.klaar;
+    koppen = p.berichten;
   }
 
   async function meer() {
-    pagina += 1;
-    await laadPagina();
+    if (laden || resultaten || koppen.length >= totaal) return;
+    laden = true;
+    const map = huidigeMap;
+    const p = await poging(() => api.berichten(map, koppen.length, STUK));
+    laden = false;
+    if (!p || map !== huidigeMap) return;
+    totaal = p.totaal;
+    koppen = [...koppen, ...p.berichten];
+  }
+
+  /** Vloeiend scrollen: bijna onderaan → volgende stuk erbij. */
+  function gescrold(e: Event) {
+    const el = e.currentTarget as HTMLElement;
+    if (el.scrollTop + el.clientHeight > el.scrollHeight - 800) meer();
+  }
+
+  let zoekTimer: ReturnType<typeof setTimeout>;
+  function typ() {
+    clearTimeout(zoekTimer);
+    inTekstGezocht = false;
+    if (!zoekterm.trim()) return wisZoeken();
+    zoekTimer = setTimeout(async () => {
+      const term = zoekterm;
+      const r = await poging(() => api.zoek(term));
+      if (r && term === zoekterm) resultaten = r;
+    }, 150);
+  }
+
+  async function zoekInTekst() {
+    const term = zoekterm;
+    zoekBezig = true;
+    const r = await poging(() => api.zoekInTekst(huidigeMap, term));
+    zoekBezig = false;
+    if (r && term === zoekterm) {
+      resultaten = r;
+      inTekstGezocht = true;
+    }
+  }
+
+  function wisZoeken() {
+    clearTimeout(zoekTimer);
+    zoekterm = "";
+    resultaten = null;
+    inTekstGezocht = false;
   }
 
   async function kies(k: Kop) {
     gekozen = k.uid;
     ladenBericht = true;
-    const b = await poging(() => api.bericht(huidigeMap, k.uid));
+    const b = await poging(() => api.bericht(k.map, k.uid));
     ladenBericht = false;
     if (b && gekozen === k.uid) open = b;
+  }
+
+  // Aantallen per map bijwerken, hooguit eens per 5 seconden.
+  let mappenTimer: ReturnType<typeof setTimeout> | undefined;
+  function mappenBijwerken() {
+    if (mappenTimer) return;
+    mappenTimer = setTimeout(async () => {
+      mappenTimer = undefined;
+      const m = await api.mappen().catch(() => null);
+      if (m) lijstMappen = m;
+    }, 5000);
   }
 
   async function afmelden() {
@@ -107,16 +176,34 @@
     afgemeld();
   }
 
-  $effect(() => {
+  // Eenmalig bij het openen: mappen ophalen, lijst vullen en luisteren naar de achtergrondsynchronisatie.
+  // `untrack`: anders zou dit opnieuw draaien telkens als huidigeMap of koppen verandert.
+  $effect(() => untrack(() => {
     poging(() => api.mappen()).then((m) => m && (lijstMappen = m));
-    laadPagina();
-  });
+    herlaad(STUK);
+    const weg = [
+      listen<string>("map-gewijzigd", (e) => {
+        if (e.payload === huidigeMap) herlaad(Math.max(STUK, koppen.length));
+        mappenBijwerken();
+      }),
+      listen<Voortgang>("sync-voortgang", (e) => (voortgang = e.payload)),
+      listen<string>("sync-fout", (e) => (verbindingsfout = e.payload)),
+    ];
+    return () => weg.forEach((w) => w.then((f) => f()));
+  }));
 </script>
 
 {#snippet zoekveld()}
   <label class="zoek">
     <Pictogram naam="zoek" maat={thema === "b" ? 20 : 16} />
-    <input type="search" placeholder="Zoeken komt in stap 3" aria-label="Zoeken" disabled />
+    <input
+      type="search"
+      placeholder="Zoek op afzender of onderwerp…"
+      aria-label="Zoeken"
+      bind:value={zoekterm}
+      oninput={typ}
+      onkeydown={(e) => e.key === "Escape" && wisZoeken()}
+    />
   </label>
 {/snippet}
 
@@ -199,10 +286,31 @@
     <section class="lijst" aria-label="Berichten">
       {#if thema === "c"}<div class="zoek-c">{@render zoekveld()}</div>{/if}
       <div class="lijstkop">
-        <h2>{naamHuidig}</h2>
-        <span>{ongelezenHuidig ? `${ongelezenHuidig} ongelezen · ` : ""}{totaal.toLocaleString("nl-NL")} berichten</span>
+        {#if resultaten}
+          <h2>{inTekstGezocht ? `In de tekst van ${naamHuidig}` : "Zoekresultaten"}</h2>
+          <span>{resultaten.length === 300 ? "eerste 300" : resultaten.length} gevonden · <button type="button" class="link" onclick={wisZoeken}>wissen</button></span>
+        {:else}
+          <h2>{naamHuidig}</h2>
+          <span>{ongelezenHuidig ? `${ongelezenHuidig} ongelezen · ` : ""}{totaal.toLocaleString("nl-NL")} berichten</span>
+        {/if}
       </div>
-      <div class="rollen">
+      {#if resultaten && !inTekstGezocht}
+        <div class="tekstzoek">
+          <button type="button" onclick={zoekInTekst} disabled={zoekBezig}>
+            <Pictogram naam="zoek" maat={14} />
+            {zoekBezig ? "Bezig met zoeken in de tekst…" : `Ook in de tekst van de mails zoeken (${naamHuidig})`}
+          </button>
+        </div>
+      {/if}
+      {#if verbindingsfout}
+        <p class="strook waarschuwing" role="status">Geen verbinding met de mailserver. De app probeert het zo opnieuw.</p>
+      {/if}
+      {#if bezigMetKlaarzetten}
+        <p class="strook" role="status">
+          {naamHuidig} wordt klaargezet: {bezigMetKlaarzetten.gedaan.toLocaleString("nl-NL")} van {bezigMetKlaarzetten.totaal.toLocaleString("nl-NL")}
+        </p>
+      {/if}
+      <div class="rollen" bind:this={rollen} onscroll={gescrold}>
         {#each groepen as g (g.titel)}
           <div class="groep">{g.titel}</div>
           {#each g.koppen as k (k.uid)}
@@ -216,6 +324,7 @@
                   <span class="van">{naamVan(k)}</span>
                   <span class="tijd">{korteDatum(k.datum)}</span>
                 </span>
+                {#if resultaten && k.map !== huidigeMap}<span class="mapetiket">{mapNaam(k.map)}</span>{/if}
                 <span class="onderwerp">
                   {#if k.beantwoord}<span class="label" title="Beantwoord"><Pictogram naam="beantwoord" maat={13} /></span>{/if}
                   {#if k.bijlage}<span class="label" title="Bijlage"><Pictogram naam="bijlage" maat={13} /></span>{/if}
@@ -225,12 +334,12 @@
             </button>
           {/each}
         {/each}
-        {#if laden}
+        {#if resultaten}
+          {#if !resultaten.length}<p class="melding">Niets gevonden{inTekstGezocht ? "" : " in afzender of onderwerp"}.</p>{/if}
+        {:else if laden}
           <p class="melding">Berichten ophalen…</p>
-        {:else if koppen.length < totaal}
-          <button type="button" class="meer" onclick={meer}>Oudere berichten laden</button>
         {:else if !koppen.length}
-          <p class="melding">Deze map is leeg.</p>
+          <p class="melding">{klaar ? "Deze map is leeg." : "Deze map wordt klaargezet…"}</p>
         {/if}
       </div>
     </section>
@@ -512,6 +621,54 @@
     vertical-align: -1px;
     margin-right: 4px;
     color: var(--tekst-zacht);
+  }
+  .strook {
+    margin: 0;
+    padding: 8px 18px;
+    font-size: 13px;
+    background: var(--accent-zacht);
+    color: var(--op-accent-zacht);
+  }
+  .strook.waarschuwing {
+    background: var(--fout-zacht);
+    color: var(--fout);
+  }
+  .tekstzoek {
+    padding: 8px 18px;
+    border-bottom: 1px solid var(--rand-licht);
+  }
+  .tekstzoek button {
+    width: 100%;
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--rand);
+    border-radius: var(--radius);
+    background: var(--knop);
+    color: var(--op-accent-zacht);
+    font-weight: 500;
+  }
+  .thema-b .tekstzoek button {
+    min-height: 44px;
+  }
+  .mapetiket {
+    align-self: flex-start;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    background: var(--rand-licht);
+    color: var(--tekst-zacht);
+  }
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--op-accent-zacht);
+    text-decoration: underline;
+    font-size: inherit;
   }
   .meer {
     display: block;

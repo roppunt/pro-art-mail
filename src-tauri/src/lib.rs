@@ -1,11 +1,17 @@
 mod account;
+mod cache;
 mod imap;
 mod mail;
+mod sync;
 
-use tauri::{AppHandle, State};
+use std::sync::Arc;
+
+use serde::Serialize;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
 use account::Account;
+use cache::Cache;
 
 /// De ene open IMAP-verbinding. Valt hij weg (slaapstand, netwerk), dan wordt hij bij de
 /// volgende opdracht opnieuw opgebouwd met het opgeslagen wachtwoord.
@@ -59,20 +65,35 @@ fn huidig_account(app: AppHandle) -> Uitkomst<Option<Account>> {
 }
 
 #[tauri::command]
-async fn inloggen(app: AppHandle, t: State<'_, Toestand>, email: String, wachtwoord: String) -> Uitkomst<Account> {
+async fn inloggen(
+    app: AppHandle,
+    t: State<'_, Toestand>,
+    s: State<'_, Arc<sync::Sync>>,
+    email: String,
+    wachtwoord: String,
+) -> Uitkomst<Account> {
     let acc = Account::voor(email.trim());
     let v = imap::verbind(&acc.imap_host, acc.imap_poort, &acc.email, &wachtwoord).await.map_err(tekst)?;
     account::bewaar(&app, &acc, &wachtwoord).map_err(tekst)?;
     *t.verbinding.lock().await = Some(v);
+    s.signaal.notify_one();
     Ok(acc)
 }
 
 #[tauri::command]
-async fn afmelden(app: AppHandle, t: State<'_, Toestand>) -> Uitkomst<()> {
+async fn afmelden(
+    app: AppHandle,
+    t: State<'_, Toestand>,
+    c: State<'_, Arc<Cache>>,
+    s: State<'_, Arc<sync::Sync>>,
+) -> Uitkomst<()> {
     if let Some(v) = t.verbinding.lock().await.take() {
         v.afmelden().await;
     }
-    account::vergeet(&app).map_err(tekst)
+    account::vergeet(&app).map_err(tekst)?;
+    c.wis_alles().map_err(tekst)?;
+    s.signaal.notify_one();
+    Ok(())
 }
 
 #[tauri::command]
@@ -80,9 +101,46 @@ async fn mappen(app: AppHandle, t: State<'_, Toestand>) -> Uitkomst<Vec<imap::Ma
     met_verbinding!(app, t, |v| v.mappen().await)
 }
 
+#[derive(Serialize)]
+struct Pagina {
+    totaal: u32,
+    /// false zolang de map voor het eerst wordt klaargezet
+    klaar: bool,
+    berichten: Vec<mail::Kop>,
+}
+
+/// Een stuk van de berichtenlijst, uit de lokale kopie (direct).
 #[tauri::command]
-async fn berichten(app: AppHandle, t: State<'_, Toestand>, map: String, pagina: u32) -> Uitkomst<imap::Pagina> {
-    met_verbinding!(app, t, |v| v.berichten(&map, pagina, 50).await)
+fn berichten(c: State<'_, Arc<Cache>>, s: State<'_, Arc<sync::Sync>>, map: String, vanaf: u32, aantal: u32) -> Uitkomst<Pagina> {
+    let klaar = c.is_klaar(&map).map_err(tekst)?;
+    if vanaf == 0 {
+        // Deze map krijgt voorrang bij het bijwerken; is hij nog niet klaar, dan meteen beginnen.
+        let anders = s.voorrang.lock().unwrap().replace(map.clone()).as_ref() != Some(&map);
+        if !klaar && anders {
+            s.signaal.notify_one();
+        }
+    }
+    let (totaal, berichten) = c.koppen(&map, vanaf, aantal).map_err(tekst)?;
+    Ok(Pagina { totaal, klaar, berichten })
+}
+
+/// Zoeken op afzender en onderwerp in alle mappen (lokale kopie, direct).
+#[tauri::command]
+fn zoek(c: State<'_, Arc<Cache>>, zoekterm: String) -> Uitkomst<Vec<mail::Kop>> {
+    c.zoek(&zoekterm, 300).map_err(tekst)
+}
+
+/// Zoeken in de volledige tekst van de mails in één map, door de server (langzamer).
+#[tauri::command]
+async fn zoek_in_tekst(
+    app: AppHandle,
+    t: State<'_, Toestand>,
+    c: State<'_, Arc<Cache>>,
+    map: String,
+    zoekterm: String,
+) -> Uitkomst<Vec<mail::Kop>> {
+    let uids = met_verbinding!(app, t, |v| v.zoek_tekst(&map, &zoekterm).await)?;
+    c.koppen_bij(&map, &uids).map_err(tekst)
 }
 
 #[tauri::command]
@@ -96,7 +154,26 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Toestand::default())
-        .invoke_handler(tauri::generate_handler![huidig_account, inloggen, afmelden, mappen, berichten, bericht])
+        .setup(|app| {
+            let map = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&map)?;
+            let cache = Arc::new(Cache::open(&map.join("kopie.sqlite"))?);
+            let s = Arc::new(sync::Sync::default());
+            sync::start(app.handle().clone(), cache.clone(), s.clone());
+            app.manage(cache);
+            app.manage(s);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            huidig_account,
+            inloggen,
+            afmelden,
+            mappen,
+            berichten,
+            zoek,
+            zoek_in_tekst,
+            bericht
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

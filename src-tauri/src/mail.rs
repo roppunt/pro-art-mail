@@ -8,8 +8,8 @@ use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct Kop {
+    pub map: String,
     pub uid: u32,
-    pub volgnummer: u32,
     pub van_naam: String,
     pub van_adres: String,
     pub onderwerp: String,
@@ -60,7 +60,7 @@ fn personen(a: Option<&Address<'_>>) -> Vec<Persoon> {
     .unwrap_or_default()
 }
 
-pub fn kop(uid: u32, volgnummer: u32, gelezen: bool, beantwoord: bool, grootte: u32, header: &[u8]) -> Kop {
+pub fn kop(map: &str, uid: u32, gelezen: bool, beantwoord: bool, grootte: u32, header: &[u8]) -> Kop {
     let m = MessageParser::default().parse_headers(header);
     let (van_naam, van_adres, onderwerp, datum, bijlage) = match &m {
         Some(m) => {
@@ -78,7 +78,7 @@ pub fn kop(uid: u32, volgnummer: u32, gelezen: bool, beantwoord: bool, grootte: 
         }
         None => Default::default(),
     };
-    Kop { uid, volgnummer, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage }
+    Kop { map: map.to_string(), uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage }
 }
 
 pub fn bericht(uid: u32, ruw: &[u8]) -> Result<Bericht> {

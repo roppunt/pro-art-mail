@@ -35,7 +35,8 @@ Een eigen email programma/app in eigen styl
 ## Nog open
 - **Uiterlijk: alle drie de ontwerpen worden thema's in de app; de gebruiker kiest zelf** (besluit Robert 2026-10-22). Canvas https://claude.ai/artifact/WwjHqQ7Ck7YUfRf44egvb7 :
   A rustig en vertrouwd (licht, 3 kolommen, blauw), B groot en eenvoudig (grote letters/knoppen, 2 kolommen, oranje),
-  C atelier (donker, verfkleuren). Alle drie hebben een knop "Opbergen in <maand>".
+  C atelier (donker, verfkleuren). De knop "Opbergen in <maand>" uit de ontwerpen vervalt (er zijn geen maandmappen);
+  voorstel "Archiveren" → `Archives.<jaar>`, wacht op Robert.
 
 ## Code en bouwen (stap 1 gebouwd 2026-10-22)
 - **Tauri 2 + SvelteKit (Svelte 5, TypeScript, SPA)**. Identifier `nl.pro-art.mail`, productnaam "Pro-Art Mail".
@@ -46,10 +47,15 @@ Een eigen email programma/app in eigen styl
     berichten met `BODY.PEEK`, dus niets verandert op de server (ook gelezen/ongelezen niet).
   - `mail.rs` — ontleden met `mail-parser`, HTML opschonen met `ammonia` (scripts/formulieren weg, inline stijlen blijven).
   - `lib.rs` — Tauri-opdrachten `huidig_account`, `inloggen`, `afmelden`, `mappen`, `berichten` (50 per pagina, nieuwste
-    eerst), `bericht`. Eén IMAP-verbinding, bij een fout één keer opnieuw verbinden (macro `met_verbinding!`).
-- Interface (`src/`): `routes/+page.svelte` (inloggen of hoofdscherm), `lib/Hoofd.svelte` (ontwerp A),
+    eerst), `bericht`. `mappen` doet STATUS per map (aantal/ongelezen) en maakt van dubbele vaste mappen (bv. `Sent` + `Sent Messages`)
+    alleen de volste "Verzonden"; de andere blijft zichtbaar onder zijn eigen naam. Eén IMAP-verbinding, bij een fout één keer opnieuw verbinden (macro `met_verbinding!`).
+- Interface (`src/`): `routes/+page.svelte` (inloggen of hoofdscherm, laadt lettertypen en thema), `lib/Hoofd.svelte`
+  (alle drie de indelingen: A drie kolommen, B tabbladen + knoppen onderaan, C donker; klassen `.thema-a/b/c`),
+  `lib/thema.ts` (keuze in `localStorage`, `data-thema` op `<html>`), `lib/Instellingen.svelte` (thema kiezen, afmelden),
+  `lib/Pictogram.svelte` (lijnpictogrammen),
   `lib/Inloggen.svelte`, `lib/Inhoud.svelte` (mail-HTML in een shadow root; links openen in de browser),
-  `lib/opmaak.ts` (datums, maandmappen herkennen), `lib/thema.css` (CSS-variabelen per thema).
+  `lib/opmaak.ts` (datums, jaararchieven `Archives.<jaar>` herkennen), `lib/thema.css` (CSS-variabelen per thema). Lettertypen lokaal via @fontsource
+  (Inter, Atkinson Hyperlegible, DM Sans): werkt zonder internet. In thema C staat de mailinhoud op een licht "vel papier".
 - ⚠️ **Rust-bouwuitvoer staat buiten Syncthing**: `src-tauri/.cargo/config.toml` (niet in git) zet `target-dir` op
   `~/.cache/pro-art-mail-target`. Anders synct ~/Projects gigabytes. Op een nieuwe machine dat bestand meenemen of opnieuw maken.
 - Bouwen/starten op ai-ubuntu (Rust via rustup in `~/.cargo`, systeempakketten `libwebkit2gtk-4.1-dev` e.a. geïnstalleerd 2026-10-22):
@@ -63,7 +69,8 @@ Een eigen email programma/app in eigen styl
 
 ## Stappenplan
 1. ✅ Basis: verbinden, mappen, postvak IN, bericht lezen (alleen lezen). Getest door Robert op ai-ubuntu 2026-10-22: inloggen werkt, mails zichtbaar.
-2. De drie thema's (A/B/C) + keuze in instellingen, per pc onthouden.
+2. ✅ (gebouwd 2026-10-22, wacht op oordeel Robert) De drie thema's (A/B/C) + keuze in Instellingen, per pc onthouden.
 3. Zoeken en snel bladeren (lokale SQLite-kopie).
-4. Beantwoorden/doorsturen/nieuw (SMTP 465, `lettre`), gelezen markeren, opbergen in maandmap, verwijderen.
+4. Beantwoorden/doorsturen/nieuw (SMTP 465, `lettre`), gelezen markeren, archiveren (?), verwijderen. Verzonden opslaan in de
+   map die eM Client gebruikt.
 5. Windows-installatie + automatische updates via GitHub (`roppunt/pro-art-mail`, **openbaar**, besluit Robert), proefdraaien op KANTOOR.

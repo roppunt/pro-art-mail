@@ -34,6 +34,8 @@ pub struct Map {
     /// inbox | concepten | verzonden | spam | prullenbak | archief | gewoon
     pub soort: String,
     pub scheiding: String,
+    pub aantal: u32,
+    pub ongelezen: u32,
 }
 
 #[derive(Serialize)]
@@ -88,9 +90,25 @@ impl Verbinding {
                 "verzonden" => "Verzonden".into(),
                 "spam" => "Spam".into(),
                 "prullenbak" => "Prullenbak".into(),
+                "archief" => "Archief".into(),
                 _ => kort,
             };
-            uit.push(Map { pad, naam, soort: soort.into(), scheiding });
+            let st = self.sessie.status(&pad, "(MESSAGES UNSEEN)").await?;
+            eprintln!("map {pad}: {} berichten, {} ongelezen", st.exists, st.unseen.unwrap_or(0));
+            uit.push(Map { pad, naam, soort: soort.into(), scheiding, aantal: st.exists, ongelezen: st.unseen.unwrap_or(0) });
+        }
+        // Dubbele vaste mappen (bv. `Sent` én `Sent Messages`, door verschillende mailprogramma's
+        // aangemaakt): de volste blijft "Verzonden", de rest wordt een gewone map met zijn eigen naam.
+        let mut volgorde: Vec<usize> = (0..uit.len()).collect();
+        volgorde.sort_by_key(|&i| std::cmp::Reverse(uit[i].aantal));
+        let mut gezien = std::collections::HashSet::new();
+        for i in volgorde {
+            let m = &mut uit[i];
+            if m.soort != "gewoon" && m.soort != "inbox" && !gezien.insert(m.soort.clone()) {
+                m.soort = "gewoon".into();
+                let leesbaar = utf7_imap::decode_utf7_imap(m.pad.clone());
+                m.naam = leesbaar.strip_prefix(&format!("INBOX{}", m.scheiding)).unwrap_or(&leesbaar).to_string();
+            }
         }
         Ok(uit)
     }

@@ -45,27 +45,24 @@ export function grootte(b: number): string {
   return `${(b / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
 }
 
-/** Maandmap herkennen ("Oktober 2026", "April_2026"): geeft [jaar, maand] of null. */
-export function maandVanMap(m: Map): [number, number] | null {
-  const r = m.naam.toLowerCase().match(/^([a-z]+)[ _-]+(\d{4})$/);
-  if (!r) return null;
-  const i = MAANDEN.indexOf(r[1]);
-  return i < 0 ? null : [Number(r[2]), i];
+/** Jaararchief herkennen (`Archives.2021`, `Archief/2023`): geeft het jaar of null. */
+export function jaarVanMap(m: Map): number | null {
+  const r = m.naam.match(/^(archives?|archief)[./](\d{4})$/i);
+  return r ? Number(r[2]) : null;
 }
 
 const VOLGORDE = ["inbox", "concepten", "verzonden", "archief", "spam", "prullenbak"];
 
-/** Verdeelt de mappen in vaste mappen, maandmappen (nieuwste eerst) en overige. */
+/** Verdeelt de mappen in vaste mappen, jaararchieven (nieuwste eerst) en overige. */
 export function indeling(lijst: Map[]) {
   const vast = lijst.filter((m) => m.soort !== "gewoon").sort((a, b) => VOLGORDE.indexOf(a.soort) - VOLGORDE.indexOf(b.soort));
   const gewoon = lijst.filter((m) => m.soort === "gewoon");
-  const maanden = gewoon
-    .map((m) => ({ m, k: maandVanMap(m) }))
-    .filter((x) => x.k)
-    .sort((a, b) => b.k![0] - a.k![0] || b.k![1] - a.k![1])
-    .map((x) => x.m);
-  const overig = gewoon.filter((m) => !maanden.includes(m)).sort((a, b) => a.naam.localeCompare(b.naam, "nl"));
-  return { vast, maanden, overig };
+  const jaren = gewoon
+    .filter((m) => jaarVanMap(m))
+    .sort((a, b) => jaarVanMap(b)! - jaarVanMap(a)!)
+    .map((m) => ({ ...m, naam: String(jaarVanMap(m)) }));
+  const overig = gewoon.filter((m) => !jaarVanMap(m)).sort((a, b) => a.naam.localeCompare(b.naam, "nl"));
+  return { vast, jaren, overig };
 }
 
 export const initiaal = (s: string) => (s.replace(/[^\p{L}\p{N}]/gu, "")[0] || "?").toUpperCase();

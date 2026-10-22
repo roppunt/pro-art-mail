@@ -1,9 +1,11 @@
-/* Thema A — rustig en vertrouwd (ontwerp A op het canvas). Thema B en C volgen in stap 2
-   als extra blokken [data-thema="b"] / [data-thema="c"] met dezelfde variabelen. */
+/* Kleuren en maten per thema (ontwerpen A, B en C op het canvas). De indeling per thema staat in Hoofd.svelte. */
+
+/* A — rustig en vertrouwd */
 :root,
 [data-thema="a"] {
   --achtergrond: #f4f5f7;
   --vlak: #ffffff;
+  --vlak-lezen: #ffffff;
   --rand: #e3e6eb;
   --rand-licht: #eef0f3;
   --tekst: #1d2433;
@@ -12,13 +14,76 @@
   --accent: #1f4e8c;
   --accent-tekst: #ffffff;
   --accent-zacht: #e8eef7;
+  --op-accent-zacht: #1f4e8c;
   --gekozen: #eef3fa;
   --map-actief: #e3e9f2;
   --invoer: #f0f2f5;
+  --knop: #ffffff;
+  --papier: transparent;
   --fout: #b42318;
   --fout-zacht: #fef3f2;
   --letter: "Inter Variable", system-ui, sans-serif;
+  --basis: 14px;
   --radius: 8px;
+  --knop-hoog: 36px;
+  color-scheme: light;
+}
+
+/* B — groot en eenvoudig */
+[data-thema="b"] {
+  --achtergrond: #fbfaf7;
+  --vlak: #ffffff;
+  --vlak-lezen: #fbfaf7;
+  --rand: #ece8e1;
+  --rand-licht: #f1eee8;
+  --tekst: #1c1b19;
+  --tekst-zacht: #57534e;
+  --tekst-mappen: #44403c;
+  --accent: #b4470b;
+  --accent-tekst: #ffffff;
+  --accent-zacht: #fbeee4;
+  --op-accent-zacht: #8a3305;
+  --gekozen: #fbeee4;
+  --map-actief: #fbeee4;
+  --invoer: #ffffff;
+  --knop: #ffffff;
+  --papier: #ffffff;
+  --fout: #b42318;
+  --fout-zacht: #fef3f2;
+  --letter: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --basis: 17px;
+  --radius: 12px;
+  --knop-hoog: 52px;
+  color-scheme: light;
+}
+
+/* C — atelier, donker */
+[data-thema="c"] {
+  --achtergrond: #17181b;
+  --vlak: #212226;
+  --vlak-lezen: #26282d;
+  --rand: #33363c;
+  --rand-licht: #2b2d32;
+  --tekst: #ebe8e2;
+  --tekst-zacht: #a8a49c;
+  --tekst-mappen: #d8d4cc;
+  --accent: #f2b35b;
+  --accent-tekst: #1b1406;
+  --accent-zacht: #3a3226;
+  --op-accent-zacht: #f2b35b;
+  --gekozen: #33363c;
+  --map-actief: #2b2d32;
+  --invoer: #2b2d32;
+  --knop: #33363c;
+  /* Mails zijn gemaakt voor een witte achtergrond: die tonen we op een licht "vel papier". */
+  --papier: #f7f5f0;
+  --fout: #ffb4a8;
+  --fout-zacht: #3d2420;
+  --letter: "DM Sans Variable", system-ui, sans-serif;
+  --basis: 15px;
+  --radius: 10px;
+  --knop-hoog: 38px;
+  color-scheme: dark;
 }
 
 html,
@@ -28,13 +93,14 @@ body {
   background: var(--achtergrond);
   color: var(--tekst);
   font-family: var(--letter);
-  font-size: 14px;
+  font-size: var(--basis);
   -webkit-font-smoothing: antialiased;
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
   color: inherit;
 }

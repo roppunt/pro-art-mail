@@ -8,6 +8,8 @@ export type Map = {
   naam: string;
   soort: "inbox" | "concepten" | "verzonden" | "spam" | "prullenbak" | "archief" | "gewoon";
   scheiding: string;
+  aantal: number;
+  ongelezen: number;
 };
 
 export type Kop = {

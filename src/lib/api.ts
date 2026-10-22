@@ -31,6 +31,7 @@ export type Kop = {
   beantwoord: boolean;
   grootte: number;
   bijlage: boolean;
+  gemarkeerd: boolean;
 };
 
 export type Pagina = { totaal: number; klaar: boolean; berichten: Kop[] };
@@ -92,6 +93,8 @@ export const bericht = (account: string, map: string, uid: number, markeer: bool
 
 // Ordenen
 export const markeer = (account: string, map: string, uids: number[], gelezen: boolean) => invoke<void>("markeer", { account, map, uids, gelezen });
+export const ster = (account: string, map: string, uids: number[], aan: boolean) => invoke<void>("ster", { account, map, uids, aan });
+export const metSter = (account: string) => invoke<Kop[]>("met_ster", { account });
 export const verwijder = (account: string, map: string, uids: number[]) => invoke<void>("verwijder", { account, map, uids });
 export const archiveer = (account: string, map: string, berichten: [number, number][]) => invoke<void>("archiveer", { account, map, berichten });
 export const verplaats = (account: string, map: string, uids: number[], doel: string) => invoke<void>("verplaats", { account, map, uids, doel });

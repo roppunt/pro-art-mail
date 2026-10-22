@@ -1,9 +1,17 @@
 <script lang="ts">
   // Kleine lijnpictogrammen; kleur volgt de tekstkleur.
-  let { naam, maat = 16 }: { naam: "zoek" | "plus" | "bijlage" | "beantwoord" | "instellingen" | "prullenbak" | "archief" | "sluiten" | "omlaag"; maat?: number } = $props();
+  let {
+    naam,
+    maat = 16,
+    gevuld = false,
+  }: {
+    naam: "zoek" | "plus" | "bijlage" | "beantwoord" | "instellingen" | "prullenbak" | "archief" | "sluiten" | "omlaag" | "ster";
+    maat?: number;
+    gevuld?: boolean;
+  } = $props();
 </script>
 
-<svg width={maat} height={maat} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<svg width={maat} height={maat} viewBox="0 0 24 24" fill={gevuld ? "currentColor" : "none"} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
   {#if naam === "zoek"}
     <circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>
   {:else if naam === "plus"}
@@ -20,6 +28,8 @@
     <path d="M3 4h18v4H3z"></path><path d="M5 8v12h14V8M10 12h4"></path>
   {:else if naam === "sluiten"}
     <path d="M18 6 6 18M6 6l12 12"></path>
+  {:else if naam === "ster"}
+    <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"></path>
   {:else if naam === "omlaag"}
     <path d="m6 9 6 6 6-6"></path>
   {/if}

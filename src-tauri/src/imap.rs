@@ -173,7 +173,8 @@ impl Verbinding {
             .filter_map(|f| {
                 let gelezen = f.flags().any(|v| matches!(v, Flag::Seen));
                 let beantwoord = f.flags().any(|v| matches!(v, Flag::Answered));
-                Some((f.uid?, (gelezen, beantwoord)))
+                let ster = f.flags().any(|v| matches!(v, Flag::Flagged));
+                Some((f.uid?, (gelezen, beantwoord, ster)))
             })
             .collect())
     }
@@ -196,6 +197,7 @@ impl Verbinding {
                 let gelezen = f.flags().any(|v| matches!(v, Flag::Seen));
                 let beantwoord = f.flags().any(|v| matches!(v, Flag::Answered));
                 let mut k = mail::kop(map, f.uid?, gelezen, beantwoord, f.size.unwrap_or(0), f.header()?);
+                k.gemarkeerd = f.flags().any(|v| matches!(v, Flag::Flagged));
                 if k.datum <= 0 {
                     // Geen (geldige) Date-kopregel: dan de ontvangstdatum van de server.
                     k.datum = f.internal_date().map(|d| d.timestamp()).unwrap_or(0);
@@ -262,6 +264,14 @@ impl Verbinding {
         self.zorg_open(map).await?;
         let teken = if gelezen { "+" } else { "-" };
         let _: Vec<_> = self.sessie.uid_store(uid_reeks(uids), format!("{teken}FLAGS.SILENT (\\Seen)")).await?.try_collect().await?;
+        Ok(())
+    }
+
+    /// Ster aan of uit (IMAP \Flagged; dezelfde markering als de vlag in eM Client en de webmail).
+    pub async fn ster(&mut self, map: &str, uids: &[u32], aan: bool) -> Result<()> {
+        self.zorg_open(map).await?;
+        let teken = if aan { "+" } else { "-" };
+        let _: Vec<_> = self.sessie.uid_store(uid_reeks(uids), format!("{teken}FLAGS.SILENT (\\Flagged)")).await?.try_collect().await?;
         Ok(())
     }
 

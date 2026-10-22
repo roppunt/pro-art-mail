@@ -111,10 +111,17 @@ Een eigen email programma/app in eigen styl
 - Lokaal een ondertekende release bouwen (test): sleutel in `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` zetten, dan
   `npx tauri build --bundles appimage` (~2 min, AppImage ~88 MB).
 
+## Versies
+- **0.1.0** (2026-10-22): eerste versie, stap 1–5.
+- **0.2.0** (2026-10-22): **sterren** (IMAP `\Flagged`, zelfde als vlag in eM Client/webmail/telefoon). Eerste wens uit de winkel:
+  ze gebruiken de ster om elkaar te laten zien wat nog moet gebeuren. Ster per regel aan/uit, knop in het leesvenster, schijnmap
+  **"Met ster"** (alle mappen; info@ had er al 306). Kopie kreeg kolom `gemarkeerd` (automatische migratie).
+
 ## Volgende stappen (stand 2026-10-22)
 - Uitrollen op de andere pc's: 2 kassa's en de laptop in de lijstenmakerij (.exe), de Zorin-pc (AppImage; libfuse2 nodig?).
 - Vóór eM Client weg kan: nagaan of eM Client **lokale mappen of contacten** heeft die niet op de server staan.
 - Ondertekeningen: Robert overlegt nog in de winkel.
+- Adres **lijstenmakerij@pro-art.nl** bestaat ook (gezien op telefoon): in de app toevoegen waar nodig.
 
 ## Ideeën voor later
 - "Verzonden" als samengevoegde weergave van `Sent` + `Sent Messages` (zolang webmail en eM Client naast de app gebruikt worden).

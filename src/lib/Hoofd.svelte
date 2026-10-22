@@ -42,6 +42,9 @@
   let zoekBezig = $state(false);
   let rollen = $state<HTMLDivElement>();
   const STUK = 100;
+  /** Schijnmap met alle mails met een ster, uit alle mappen. */
+  const STER = "__ster__";
+  let aantalSter = $state(0);
   let gekozen = $state<number | null>(null);
   let open = $state<Bericht | null>(null);
   let ladenBericht = $state(false);
@@ -53,7 +56,7 @@
   let bezigMetActie = $state(false);
 
   const ind = $derived(indeling(lijstMappen));
-  const naamHuidig = $derived(lijstMappen.find((m) => m.pad === huidigeMap)?.naam ?? "Postvak IN");
+  const naamHuidig = $derived(huidigeMap === STER ? "Met ster" : (lijstMappen.find((m) => m.pad === huidigeMap)?.naam ?? "Postvak IN"));
   const ongelezenHuidig = $derived(lijstMappen.find((m) => m.pad === huidigeMap)?.ongelezen ?? 0);
   const mapNaam = (pad: string) => lijstMappen.find((m) => m.pad === pad)?.naam ?? pad;
   // Bij Concepten het totaal (die zijn nooit "ongelezen"), elders het aantal ongelezen.
@@ -115,6 +118,14 @@
   /** Haalt de bovenste `aantal` berichten opnieuw uit de lokale kopie (direct). */
   async function herlaad(aantal: number) {
     const map = huidigeMap;
+    if (map === STER) {
+      const l = await poging(() => api.metSter(account));
+      if (!l || map !== huidigeMap) return;
+      koppen = l;
+      totaal = aantalSter = l.length;
+      klaar = true;
+      return;
+    }
     const p = await poging(() => api.berichten(account, map, 0, aantal));
     if (!p || map !== huidigeMap) return;
     totaal = p.totaal;
@@ -123,7 +134,7 @@
   }
 
   async function meer() {
-    if (laden || resultaten || koppen.length >= totaal) return;
+    if (laden || resultaten || huidigeMap === STER || koppen.length >= totaal) return;
     laden = true;
     const map = huidigeMap;
     const p = await poging(() => api.berichten(account, map, koppen.length, STUK));
@@ -180,6 +191,24 @@
       open = b;
       openKop = k;
       if (markeer) zetGelezen(k, true);
+    }
+  }
+
+  async function telSterren() {
+    const l = await api.metSter(account).catch(() => null);
+    if (l) aantalSter = l.length;
+  }
+
+  /** Ster aan/uit. Meteen zichtbaar; lukt het op de server niet, dan terug. */
+  async function wisselSter(k: Kop, e?: Event) {
+    e?.stopPropagation();
+    const aan = !k.gemarkeerd;
+    k.gemarkeerd = aan;
+    aantalSter += aan ? 1 : -1;
+    const ok = await poging(async () => (await api.ster(account, k.map, [k.uid], aan), true));
+    if (!ok) {
+      k.gemarkeerd = !aan;
+      aantalSter += aan ? -1 : 1;
     }
   }
 
@@ -339,11 +368,13 @@
   $effect(() => untrack(() => {
     poging(() => api.mappen(account)).then((m) => m && (lijstMappen = m));
     herlaad(STUK);
+    telSterren();
     const weg = [
       listen<Gebeurtenis>("map-gewijzigd", (e) => {
         if (e.payload.account !== account) return;
-        if (e.payload.map === huidigeMap) herlaad(Math.max(STUK, koppen.length));
+        if (e.payload.map === huidigeMap || huidigeMap === STER) herlaad(Math.max(STUK, koppen.length));
         mappenBijwerken();
+        telSterren();
       }),
       listen<Voortgang>("sync-voortgang", (e) => e.payload.account === account && (voortgang = e.payload)),
       listen<{ account: string; fout: string }>("sync-fout", (e) => e.payload.account === account && (verbindingsfout = e.payload.fout)),
@@ -374,6 +405,14 @@
   </button>
 {/snippet}
 
+{#snippet sterknopMap()}
+  <button type="button" class="map" class:actief={huidigeMap === STER} onclick={() => kiesMap(STER)}>
+    {#if thema === "c"}<span class="stip" style="background: #f2b35b" aria-hidden="true"></span>{:else}<span class="sterpicto"><Pictogram naam="ster" maat={14} gevuld /></span>{/if}
+    <span class="mapnaam">Met ster</span>
+    {#if aantalSter}<span class="teller">{aantalSter}</span>{/if}
+  </button>
+{/snippet}
+
 {#snippet acties(b: Bericht, k: Kop)}
   {#if soortVan(k.map) === "concepten"}
     <button type="button" class="primair" onclick={() => verderSchrijven(b, k)}>Verder schrijven</button>
@@ -383,6 +422,9 @@
     <button type="button" onclick={() => doorsturen(b, k)}>Doorsturen</button>
   {/if}
   <div class="ruimte"></div>
+  <button type="button" class="ster-actie" class:aan={k.gemarkeerd} aria-pressed={k.gemarkeerd} onclick={() => wisselSter(k)} title={k.gemarkeerd ? "Ster weghalen" : "Ster geven"}>
+    <Pictogram naam="ster" gevuld={k.gemarkeerd} /> {k.gemarkeerd ? "Ster weghalen" : "Ster"}
+  </button>
   {#if thema !== "b"}<button type="button" onclick={() => ongelezen(k)} title="Markeer als ongelezen">Ongelezen</button>{/if}
   {#if !["archief", "prullenbak", "concepten"].includes(soortVan(k.map) ?? "") && !/^archive/i.test(k.map)}
     <button type="button" class="zacht-accent" disabled={bezigMetActie} onclick={() => archiveren(k)}><Pictogram naam="archief" /> Archiveren</button>
@@ -408,8 +450,11 @@
       <div class="merk"><span class="logo">PA</span> Pro-Art Mail</div>
       {#if thema === "b"}
         <nav class="tabs" aria-label="Mappen">
-          {#each tabs as m (m.pad)}
+          {#each tabs as m, i (m.pad)}
             <button type="button" class="tab" class:actief={m.pad === huidigeMap} onclick={() => kiesMap(m.pad)}>{m.naam}{#if teller(m)} <span class="teller">{teller(m)}</span>{/if}</button>
+            {#if i === 0}
+              <button type="button" class="tab" class:actief={huidigeMap === STER} onclick={() => kiesMap(STER)}>Met ster{#if aantalSter} <span class="teller">{aantalSter}</span>{/if}</button>
+            {/if}
           {/each}
           <label class="tab meer" class:actief={meerGekozen}>
             <span class="verborgen">Meer mappen</span>
@@ -444,7 +489,10 @@
           <button class="primair" type="button" onclick={() => (opstellen = leeg())}>Nieuwe mail</button>
         {/if}
         <div class="kopje eerste">{@render accountkeuze()}</div>
-        {#each ind.vast as m (m.pad)}{@render mapknop(m)}{/each}
+        {#each ind.vast as m, i (m.pad)}
+          {@render mapknop(m)}
+          {#if i === 0}{@render sterknopMap()}{/if}
+        {/each}
         {#if ind.jaren.length}
           <div class="kopje">Archief per jaar</div>
           {#each ind.jaren as m (m.pad)}{@render mapknop(m)}{/each}
@@ -493,7 +541,8 @@
         {#each groepen as g (g.titel)}
           <div class="groep">{g.titel}</div>
           {#each g.koppen as k (k.uid)}
-            <button type="button" class="regel" class:nieuw={!k.gelezen} class:gekozen={k.uid === gekozen} onclick={() => kies(k)}>
+            <div class="regelhouder">
+            <button type="button" class="regel" class:nieuw={!k.gelezen} class:gekozen={k.uid === gekozen && k.map === openKop?.map} onclick={() => kies(k)}>
               {#if thema === "b"}
                 <span class="bol" style="background: {bolkleur(naamVan(k))}" aria-hidden="true">{initiaal(naamVan(k))}</span>
               {/if}
@@ -503,7 +552,7 @@
                   <span class="van">{naamVan(k)}</span>
                   <span class="tijd">{korteDatum(k.datum)}</span>
                 </span>
-                {#if resultaten && k.map !== huidigeMap}<span class="mapetiket">{mapNaam(k.map)}</span>{/if}
+                {#if (resultaten || huidigeMap === STER) && k.map !== huidigeMap}<span class="mapetiket">{mapNaam(k.map)}</span>{/if}
                 <span class="onderwerp">
                   {#if k.beantwoord}<span class="label" title="Beantwoord"><Pictogram naam="beantwoord" maat={13} /></span>{/if}
                   {#if k.bijlage}<span class="label" title="Bijlage"><Pictogram naam="bijlage" maat={13} /></span>{/if}
@@ -511,6 +560,18 @@
                 </span>
               </span>
             </button>
+            <button
+              type="button"
+              class="sterknop"
+              class:aan={k.gemarkeerd}
+              aria-pressed={k.gemarkeerd}
+              aria-label={k.gemarkeerd ? "Ster weghalen" : "Ster geven"}
+              title={k.gemarkeerd ? "Ster weghalen" : "Ster geven"}
+              onclick={(e) => wisselSter(k, e)}
+            >
+              <Pictogram naam="ster" maat={thema === "b" ? 22 : 18} gevuld={k.gemarkeerd} />
+            </button>
+            </div>
           {/each}
         {/each}
         {#if resultaten}
@@ -774,6 +835,53 @@
   .regel.gekozen {
     background: var(--gekozen);
     box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .regelhouder {
+    position: relative;
+  }
+  .sterknop {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--tekst-zacht);
+    opacity: 0.55;
+  }
+  .sterknop:hover {
+    opacity: 1;
+    background: var(--rand-licht);
+  }
+  .sterknop.aan,
+  .ster-actie.aan,
+  .sterpicto {
+    color: #e0a100;
+    opacity: 1;
+  }
+  .thema-c .sterknop.aan,
+  .thema-c .ster-actie.aan {
+    color: #f2b35b;
+  }
+  .regel .onderwerp {
+    padding-right: 30px;
+  }
+  .thema-b .sterknop {
+    right: 26px;
+    bottom: 50%;
+    translate: 0 50%;
+    width: 40px;
+    height: 40px;
+  }
+  .thema-b .regel .regeltekst {
+    padding-right: 44px;
+  }
+  .sterpicto {
+    display: inline-flex;
   }
   .regeltekst {
     flex: 1;

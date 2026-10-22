@@ -19,6 +19,8 @@ pub struct Kop {
     pub beantwoord: bool,
     pub grootte: u32,
     pub bijlage: bool,
+    /// Ster (IMAP \Flagged): in de winkel gebruikt als "moet nog gebeuren".
+    pub gemarkeerd: bool,
 }
 
 #[derive(Serialize)]
@@ -83,7 +85,7 @@ pub fn kop(map: &str, uid: u32, gelezen: bool, beantwoord: bool, grootte: u32, h
         }
         None => Default::default(),
     };
-    Kop { map: map.to_string(), uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage }
+    Kop { map: map.to_string(), uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage, gemarkeerd: false }
 }
 
 pub fn bericht(uid: u32, ruw: &[u8]) -> Result<Bericht> {

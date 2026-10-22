@@ -224,6 +224,21 @@ async fn markeer(app: AppHandle, t: State<'_, Toestand>, account: String, map: S
     Ok(())
 }
 
+#[tauri::command]
+async fn ster(app: AppHandle, t: State<'_, Toestand>, account: String, map: String, uids: Vec<u32>, aan: bool) -> Uitkomst<()> {
+    let at = haal(&app, &t, &account)?;
+    met_verbinding!(app, at, account, |v| v.ster(&map, &uids, aan).await)?;
+    at.cache.zet_ster(&map, &uids, aan).map_err(tekst)?;
+    gewijzigd(&app, &account, &map);
+    Ok(())
+}
+
+/// Alle mails met een ster, uit alle mappen (lokale kopie).
+#[tauri::command]
+fn met_ster(app: AppHandle, t: State<'_, Toestand>, account: String) -> Uitkomst<Vec<mail::Kop>> {
+    haal(&app, &t, &account)?.cache.met_ster(1000).map_err(tekst)
+}
+
 async fn verplaats_naar(app: &AppHandle, at: &AccountToestand, account: &str, map: &str, uids: &[u32], doel: &str) -> Uitkomst<()> {
     met_verbinding!(app, at, account, |v| v.verplaats(map, uids, doel).await)?;
     at.cache.werk_bij(map, uids, &[]).map_err(tekst)?;
@@ -430,6 +445,8 @@ pub fn run() {
             adressen,
             bericht,
             markeer,
+            ster,
+            met_ster,
             verplaats,
             verwijder,
             archiveer,

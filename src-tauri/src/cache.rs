@@ -16,8 +16,8 @@ pub struct Cache {
     db: Mutex<Connection>,
 }
 
-/// Vlaggen zoals ze in de kopie staan: (gelezen, beantwoord).
-pub type Vlaggen = (bool, bool);
+/// Vlaggen zoals ze in de kopie staan: (gelezen, beantwoord, ster).
+pub type Vlaggen = (bool, bool, bool);
 
 impl Cache {
     pub fn open(pad: &Path) -> Result<Self> {
@@ -47,6 +47,15 @@ impl Cache {
              );
              CREATE INDEX IF NOT EXISTS koppen_op_datum ON koppen (map, datum DESC);",
         )?;
+        // Kolom `gemarkeerd` (ster, IMAP \Flagged) kwam er in v0.2 bij. De eerstvolgende ronde
+        // van de achtergrondverbinding vult hem, want die vergelijkt alle vlaggen met de server.
+        let heeft_ster: bool = db.prepare("SELECT 1 FROM pragma_table_info('koppen') WHERE name = 'gemarkeerd'")?.exists([])?;
+        if !heeft_ster {
+            db.execute_batch(
+                "ALTER TABLE koppen ADD COLUMN gemarkeerd INTEGER NOT NULL DEFAULT 0;
+                 CREATE INDEX IF NOT EXISTS koppen_met_ster ON koppen (gemarkeerd) WHERE gemarkeerd = 1;",
+            )?;
+        }
         Ok(Cache { db: Mutex::new(db) })
     }
 
@@ -83,8 +92,8 @@ impl Cache {
 
     pub fn vlaggen(&self, pad: &str) -> Result<HashMap<u32, Vlaggen>> {
         let db = self.db.lock().unwrap();
-        let mut st = db.prepare("SELECT uid, gelezen, beantwoord FROM koppen WHERE map = ?1")?;
-        let rijen = st.query_map([pad], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+        let mut st = db.prepare("SELECT uid, gelezen, beantwoord, gemarkeerd FROM koppen WHERE map = ?1")?;
+        let rijen = st.query_map([pad], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))?;
         Ok(rijen.collect::<Result<_, _>>()?)
     }
 
@@ -105,9 +114,9 @@ impl Cache {
             for uid in weg {
                 del.execute(params![pad, uid])?;
             }
-            let mut upd = tx.prepare("UPDATE koppen SET gelezen = ?3, beantwoord = ?4 WHERE map = ?1 AND uid = ?2")?;
-            for (uid, (g, b)) in vlaggen {
-                upd.execute(params![pad, uid, g, b])?;
+            let mut upd = tx.prepare("UPDATE koppen SET gelezen = ?3, beantwoord = ?4, gemarkeerd = ?5 WHERE map = ?1 AND uid = ?2")?;
+            for (uid, (g, b, s)) in vlaggen {
+                upd.execute(params![pad, uid, g, b, s])?;
             }
         }
         tx.commit()?;
@@ -120,13 +129,14 @@ impl Cache {
         {
             let mut ins = tx.prepare(
                 "INSERT OR REPLACE INTO koppen
-                 (map, uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage, zoek)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 (map, uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage, zoek, gemarkeerd)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?;
             for k in koppen {
                 let zoek = format!("{} {} {}", k.van_naam, k.van_adres, k.onderwerp).to_lowercase();
                 ins.execute(params![
-                    pad, k.uid, k.van_naam, k.van_adres, k.onderwerp, k.datum, k.gelezen, k.beantwoord, k.grootte, k.bijlage, zoek
+                    pad, k.uid, k.van_naam, k.van_adres, k.onderwerp, k.datum, k.gelezen, k.beantwoord, k.grootte, k.bijlage, zoek,
+                    k.gemarkeerd
                 ])?;
             }
         }
@@ -146,10 +156,11 @@ impl Cache {
             beantwoord: r.get(7)?,
             grootte: r.get(8)?,
             bijlage: r.get(9)?,
+            gemarkeerd: r.get(10)?,
         })
     }
 
-    const VELDEN: &str = "map, uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage";
+    const VELDEN: &str = "map, uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage, gemarkeerd";
 
     /// Een stuk van de lijst, nieuwste eerst.
     pub fn koppen(&self, pad: &str, vanaf: u32, aantal: u32) -> Result<(u32, Vec<Kop>)> {
@@ -201,6 +212,27 @@ impl Cache {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn zet_ster(&self, pad: &str, uids: &[u32], aan: bool) -> Result<()> {
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction()?;
+        for uid in uids {
+            tx.execute("UPDATE koppen SET gemarkeerd = ?3 WHERE map = ?1 AND uid = ?2", params![pad, uid, aan])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Alle berichten met een ster, uit alle mappen, nieuwste eerst.
+    pub fn met_ster(&self, max: u32) -> Result<Vec<Kop>> {
+        let db = self.db.lock().unwrap();
+        let mut st = db.prepare(&format!(
+            "SELECT {} FROM koppen WHERE gemarkeerd = 1 ORDER BY datum DESC LIMIT {max}",
+            Self::VELDEN
+        ))?;
+        let koppen = st.query_map([], Self::rij)?.collect::<Result<_, _>>()?;
+        Ok(koppen)
     }
 
     /// Adressen waarvan mail binnenkwam, als "Naam <adres>", vaakst gebruikte eerst.

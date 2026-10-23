@@ -124,7 +124,7 @@ Een eigen email programma/app in eigen styl
   **Bevestigd door Robert op de Zorin-pc (2026-10-23): pictogram staat op het bureaublad.**
 
 ## Volgende stappen (stand 2026-10-22)
-- **Nog te bevestigen:** dat de automatische update 0.1.0 → 0.2.0 op de kantoor-pc werkt (eerste echte test van de updater; 0.2.0 staat sinds 2026-10-22 op GitHub, `latest.json` wijst ernaar).
+- ✅ **Automatische updates werken** op Windows én Zorin (bevestigd door Robert 2026-10-23).
 - Ondertekensleutel (`~/.tauri/pro-art-mail.key` + `.key.wachtwoord`) ook in Roberts wachtwoordbeheerder laten zetten (nog niet bevestigd).
 - ✅ **Uitgerold op alle vijf de winkel-pc's** (bevestigd door Robert 2026-10-23): kantoor-pc, 2 kassa's en laptop lijstenmakerij (.exe), Zorin-pc (AppImage 0.2.1).
 - Vóór eM Client weg kan: nagaan of eM Client **lokale mappen of contacten** heeft die niet op de server staan.

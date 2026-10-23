@@ -2,6 +2,8 @@ mod account;
 mod cache;
 mod imap;
 mod mail;
+#[cfg(target_os = "linux")]
+mod snelkoppeling;
 mod sync;
 mod versturen;
 
@@ -431,6 +433,8 @@ pub fn run() {
                     let _ = std::fs::remove_file(map.join(n));
                 }
             }
+            #[cfg(target_os = "linux")]
+            std::thread::spawn(snelkoppeling::regel);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

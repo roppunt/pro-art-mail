@@ -116,6 +116,11 @@ Een eigen email programma/app in eigen styl
 - **0.2.0** (2026-10-22): **sterren** (IMAP `\Flagged`, zelfde als vlag in eM Client/webmail/telefoon). Eerste wens uit de winkel:
   ze gebruiken de ster om elkaar te laten zien wat nog moet gebeuren. Ster per regel aan/uit, knop in het leesvenster, schijnmap
   **"Met ster"** (alle mappen; info@ had er al 306). Kopie kreeg kolom `gemarkeerd` (automatische migratie).
+- **0.2.1** (2026-10-23): **Linux/AppImage vindbaar na sluiten** (melding Robert, Zorin-pc: na sluiten was het programma weg).
+  `snelkoppeling.rs` regelt bij elke start (alleen als `$APPIMAGE` gezet is): AppImage gekopieerd naar
+  `~/Applications/pro-art-mail.AppImage` (vaste plek, daar werkt de updater voortaan), menu-item
+  `~/.local/share/applications/nl.pro-art.mail.desktop`, pictogram in `~/.local/share/icons/hicolor/256x256/apps/`, en
+  één keer een icoon op het bureaublad (`gio … metadata::trusted true`; weggehaald = blijft weg, vlag in `~/.local/share/pro-art-mail/`).
 
 ## Volgende stappen (stand 2026-10-22)
 - **Nog te bevestigen:** dat de automatische update 0.1.0 → 0.2.0 op de kantoor-pc werkt (eerste echte test van de updater; 0.2.0 staat sinds 2026-10-22 op GitHub, `latest.json` wijst ernaar).

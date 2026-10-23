@@ -121,11 +121,12 @@ Een eigen email programma/app in eigen styl
   `~/Applications/pro-art-mail.AppImage` (vaste plek, daar werkt de updater voortaan), menu-item
   `~/.local/share/applications/nl.pro-art.mail.desktop`, pictogram in `~/.local/share/icons/hicolor/256x256/apps/`, en
   één keer een icoon op het bureaublad (`gio … metadata::trusted true`; weggehaald = blijft weg, vlag in `~/.local/share/pro-art-mail/`).
+  **Bevestigd door Robert op de Zorin-pc (2026-10-23): pictogram staat op het bureaublad.**
 
 ## Volgende stappen (stand 2026-10-22)
 - **Nog te bevestigen:** dat de automatische update 0.1.0 → 0.2.0 op de kantoor-pc werkt (eerste echte test van de updater; 0.2.0 staat sinds 2026-10-22 op GitHub, `latest.json` wijst ernaar).
 - Ondertekensleutel (`~/.tauri/pro-art-mail.key` + `.key.wachtwoord`) ook in Roberts wachtwoordbeheerder laten zetten (nog niet bevestigd).
-- Uitrollen op de andere pc's: 2 kassa's en de laptop in de lijstenmakerij (.exe), de Zorin-pc (AppImage; libfuse2 nodig?).
+- Uitrollen op de andere pc's: 2 kassa's en de laptop in de lijstenmakerij (.exe), de Zorin-pc staat erop sinds 2026-10-23 (AppImage 0.2.1, werkt).
 - Vóór eM Client weg kan: nagaan of eM Client **lokale mappen of contacten** heeft die niet op de server staan.
 - Ondertekeningen: Robert overlegt nog in de winkel.
 - Adres **lijstenmakerij@pro-art.nl** bestaat ook (gezien op telefoon): in de app toevoegen waar nodig.

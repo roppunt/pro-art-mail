@@ -125,7 +125,7 @@ Een eigen email programma/app in eigen styl
 - **0.2.2** (2026-10-29): **afdrukken** (vraag uit de winkel). Printerknop in het leesvenster (`src/lib/afdrukken.ts`): zet een
   vel `#afdruk` direct in `<body>` met onderwerp, Van/Aan/Cc/Datum/bijlagenamen + inhoud (shadow root), `@media print` verbergt de rest
   van de app, wacht max. 3 s op afbeeldingen, dan `window.print()` (systeemdialoog: printer of PDF). Altijd zwart op wit, ook in thema C.
-  Getest door Robert op ai-ubuntu (Linux); Windows (WebView2) nog bevestigen na de update.
+  Getest door Robert op ai-ubuntu (Linux) en bevestigd op Windows (2026-10-29).
 
 ## Volgende stappen (stand 2026-10-22)
 - ✅ **Automatische updates werken** op Windows én Zorin (bevestigd door Robert 2026-10-23).

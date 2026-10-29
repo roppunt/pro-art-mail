@@ -5,7 +5,7 @@
     maat = 16,
     gevuld = false,
   }: {
-    naam: "zoek" | "plus" | "bijlage" | "beantwoord" | "instellingen" | "prullenbak" | "archief" | "sluiten" | "omlaag" | "ster";
+    naam: "zoek" | "plus" | "bijlage" | "beantwoord" | "instellingen" | "prullenbak" | "archief" | "sluiten" | "omlaag" | "ster" | "printer";
     maat?: number;
     gevuld?: boolean;
   } = $props();
@@ -30,6 +30,8 @@
     <path d="M18 6 6 18M6 6l12 12"></path>
   {:else if naam === "ster"}
     <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"></path>
+  {:else if naam === "printer"}
+    <path d="M7 9V3h10v6"></path><rect x="3" y="9" width="18" height="8" rx="2"></rect><path d="M7 14h10v7H7z"></path>
   {:else if naam === "omlaag"}
     <path d="m6 9 6 6 6-6"></path>
   {/if}

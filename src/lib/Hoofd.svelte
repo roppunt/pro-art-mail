@@ -5,6 +5,7 @@
   import * as api from "./api";
   import type { Account, Bericht, Gebeurtenis, Kop, Map, Voortgang } from "./api";
   import Inhoud from "./Inhoud.svelte";
+  import { afdrukken } from "./afdrukken";
   import Instellingen from "./Instellingen.svelte";
   import Opstellen, { type Begin } from "./Opstellen.svelte";
   import Pictogram from "./Pictogram.svelte";
@@ -426,6 +427,7 @@
     <Pictogram naam="ster" gevuld={k.gemarkeerd} /> {k.gemarkeerd ? "Ster weghalen" : "Ster"}
   </button>
   {#if thema !== "b"}<button type="button" onclick={() => ongelezen(k)} title="Markeer als ongelezen">Ongelezen</button>{/if}
+  <button type="button" onclick={() => afdrukken(b)} aria-label="Afdrukken" title="Afdrukken"><Pictogram naam="printer" />{#if thema === "b"} Afdrukken{/if}</button>
   {#if !["archief", "prullenbak", "concepten"].includes(soortVan(k.map) ?? "") && !/^archive/i.test(k.map)}
     <button type="button" class="zacht-accent" disabled={bezigMetActie} onclick={() => archiveren(k)}><Pictogram naam="archief" /> Archiveren</button>
   {/if}

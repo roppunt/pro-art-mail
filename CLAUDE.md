@@ -122,6 +122,10 @@ Een eigen email programma/app in eigen styl
   `~/.local/share/applications/nl.pro-art.mail.desktop`, pictogram in `~/.local/share/icons/hicolor/256x256/apps/`, en
   één keer een icoon op het bureaublad (`gio … metadata::trusted true`; weggehaald = blijft weg, vlag in `~/.local/share/pro-art-mail/`).
   **Bevestigd door Robert op de Zorin-pc (2026-10-23): pictogram staat op het bureaublad.**
+- **0.2.2** (2026-10-29): **afdrukken** (vraag uit de winkel). Printerknop in het leesvenster (`src/lib/afdrukken.ts`): zet een
+  vel `#afdruk` direct in `<body>` met onderwerp, Van/Aan/Cc/Datum/bijlagenamen + inhoud (shadow root), `@media print` verbergt de rest
+  van de app, wacht max. 3 s op afbeeldingen, dan `window.print()` (systeemdialoog: printer of PDF). Altijd zwart op wit, ook in thema C.
+  Getest door Robert op ai-ubuntu (Linux); Windows (WebView2) nog bevestigen na de update.
 
 ## Volgende stappen (stand 2026-10-22)
 - ✅ **Automatische updates werken** op Windows én Zorin (bevestigd door Robert 2026-10-23).

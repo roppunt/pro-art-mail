@@ -129,6 +129,7 @@ Een eigen email programma/app in eigen styl
 - **0.2.3** (2026-10-31): **verzonden mail bij mailboxen zonder `Sent Messages`** (melding Robert, lijstenmakerij@). De standaard voor pro-art.nl is
   `Sent Messages`, maar lijstenmakerij@ heeft alleen `Sent`, dus de APPEND mislukte na het versturen (mail wel weg, geen kopie, concept wel gewist).
   `Verbinding::verzonden_map`: de ingestelde map als die bestaat, anders de vaste map van de mailbox.
+  Bevestigd door Robert op de lijstenmakerij (2026-10-31).
 
 ## Volgende stappen (stand 2026-10-22)
 - ✅ **Automatische updates werken** op Windows én Zorin (bevestigd door Robert 2026-10-23).

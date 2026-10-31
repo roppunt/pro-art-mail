@@ -365,11 +365,7 @@ async fn verstuur(app: AppHandle, t: State<'_, Toestand>, concept: versturen::Co
 
     // Vanaf hier is de mail weg; fouten hierna melden we, maar de mail is wel verstuurd.
     let mut naderhand = Vec::new();
-    let verzonden = if acc.verzonden_map.is_empty() {
-        met_verbinding!(app, at, account, |v| v.vaste_map("verzonden").await).ok().flatten().map(|m| m.0)
-    } else {
-        Some(acc.verzonden_map.clone())
-    };
+    let verzonden = met_verbinding!(app, at, account, |v| v.verzonden_map(&acc.verzonden_map).await).ok().flatten();
     match verzonden {
         Some(map) => match met_verbinding!(app, at, account, |v| v.bewaar_in(&map, "(\\Seen)", &mail.formatted()).await) {
             Ok(()) => at.sync.werk_bij(&map),

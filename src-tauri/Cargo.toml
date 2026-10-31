@@ -1,6 +1,6 @@
 [package]
 name = "pro-art-mail"
-version = "0.2.2"
+version = "0.2.3"
 description = "Pro-Art Mail"
 authors = ["Robert Nillesen"]
 edition = "2024"

@@ -154,6 +154,15 @@ impl Verbinding {
         Ok(op_naam)
     }
 
+    /// Map voor verstuurde mail: de ingestelde als die in deze mailbox bestaat, anders de vaste map.
+    /// Niet elke pro-art.nl-mailbox heeft `Sent Messages` (lijstenmakerij@ heeft alleen `Sent`).
+    pub async fn verzonden_map(&mut self, ingesteld: &str) -> Result<Option<String>> {
+        if !ingesteld.is_empty() && self.mappaden().await?.iter().any(|p| p == ingesteld) {
+            return Ok(Some(ingesteld.to_string()));
+        }
+        Ok(self.vaste_map("verzonden").await?.map(|m| m.0))
+    }
+
     /// Alle selecteerbare mappen, zonder verdere gegevens (voor het bijwerken van de kopie).
     pub async fn mappaden(&mut self) -> Result<Vec<String>> {
         let namen: Vec<_> = self.sessie.list(Some(""), Some("*")).await?.try_collect().await?;

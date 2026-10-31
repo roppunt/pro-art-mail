@@ -126,6 +126,9 @@ Een eigen email programma/app in eigen styl
   vel `#afdruk` direct in `<body>` met onderwerp, Van/Aan/Cc/Datum/bijlagenamen + inhoud (shadow root), `@media print` verbergt de rest
   van de app, wacht max. 3 s op afbeeldingen, dan `window.print()` (systeemdialoog: printer of PDF). Altijd zwart op wit, ook in thema C.
   Getest door Robert op ai-ubuntu (Linux) en bevestigd op Windows (2026-10-29).
+- **0.2.3** (2026-10-31): **verzonden mail bij mailboxen zonder `Sent Messages`** (melding Robert, lijstenmakerij@). De standaard voor pro-art.nl is
+  `Sent Messages`, maar lijstenmakerij@ heeft alleen `Sent`, dus de APPEND mislukte na het versturen (mail wel weg, geen kopie, concept wel gewist).
+  `Verbinding::verzonden_map`: de ingestelde map als die bestaat, anders de vaste map van de mailbox.
 
 ## Volgende stappen (stand 2026-10-22)
 - ✅ **Automatische updates werken** op Windows én Zorin (bevestigd door Robert 2026-10-23).

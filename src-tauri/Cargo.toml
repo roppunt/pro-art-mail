@@ -1,6 +1,6 @@
 [package]
 name = "pro-art-mail"
-version = "0.2.3"
+version = "0.2.4"
 description = "Pro-Art Mail"
 authors = ["Robert Nillesen"]
 edition = "2024"
@@ -39,6 +39,7 @@ base64 = "0.23.1"
 mime_guess = "2.0.5"
 tauri-plugin-updater = "2.14.0"
 tauri-plugin-process = "2.4.0"
+tauri-plugin-single-instance = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

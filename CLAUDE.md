@@ -130,6 +130,12 @@ Een eigen email programma/app in eigen styl
   `Sent Messages`, maar lijstenmakerij@ heeft alleen `Sent`, dus de APPEND mislukte na het versturen (mail wel weg, geen kopie, concept wel gewist).
   `Verbinding::verzonden_map`: de ingestelde map als die bestaat, anders de vaste map van de mailbox.
   Bevestigd door Robert op de lijstenmakerij (2026-10-31).
+- **0.2.4** (2026-11-04, nog niet uitgebracht): **app draait maar één keer** (`tauri-plugin-single-instance`, als eerste plugin; een tweede klik
+  haalt het open venster naar voren). Aanleiding KANTOOR 2026-11-04: de app werd drie keer kort na elkaar gestart (13:47:59–13:48:06), elk exemplaar
+  downloadde de 0.2.3-update en de derde installer liep vast op "Fout bij het schrijven naar bestand … pro-art-mail.exe" omdat de eerste de app al
+  had herstart (op 23-10 ook al twee 0.2.0-downloads binnen 10 s). Daarnaast een **schermvullende melding tijdens het bijwerken** ("niet afsluiten en
+  niet opnieuw op het icoon klikken"). Getest op ai-ubuntu: tweede start stopt meteen, één proces. Melding zelf niet visueel getest.
+  ⚠️ Let op bij het nakijken: NSIS neemt de bouwtijd mee als bestandsdatum van `pro-art-mail.exe`; die datum zegt dus niets over wanneer de update is geïnstalleerd.
 
 ## Volgende stappen (stand 2026-10-22)
 - ✅ **Automatische updates werken** op Windows én Zorin (bevestigd door Robert 2026-10-23).

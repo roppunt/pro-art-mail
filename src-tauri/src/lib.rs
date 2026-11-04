@@ -417,6 +417,15 @@ fn bewaar_ondertekeningen(app: AppHandle, lijst: Vec<Ondertekening>) -> Uitkomst
 pub fn run() {
     let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
+        // Moet als eerste plugin: een tweede klik op het icoon start geen tweede app (die zou ook gaan
+        // bijwerken en dan botsen met de eerste, gezien op KANTOOR 2026-11-04), maar haalt het open venster naar voren.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

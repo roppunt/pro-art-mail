@@ -46,7 +46,16 @@
   $effect(() => zetThema(thema));
 </script>
 
-{#if updateMelding}<div class="update" role="status">{updateMelding}</div>{/if}
+{#if updateMelding}
+  <div class="update" role="status" aria-live="assertive">
+    <div class="update-kaart">
+      <div class="update-titel">{updateMelding}</div>
+      <p>Even geduld, dit duurt ongeveer een halve minuut.<br />
+        <strong>Niet afsluiten en niet opnieuw op het icoon klikken.</strong><br />
+        Pro-Art Mail start daarna vanzelf opnieuw.</p>
+    </div>
+  </div>
+{/if}
 
 {#if accounts === undefined}
   <!-- even geduld: accounts van deze pc ophalen -->
@@ -68,14 +77,28 @@
 <style>
   .update {
     position: fixed;
-    top: 12px;
-    left: 50%;
-    translate: -50% 0;
+    inset: 0;
     z-index: 30;
-    padding: 10px 18px;
-    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, var(--accent) 35%, rgb(0 0 0 / 0.55));
+  }
+  .update-kaart {
+    max-width: 440px;
+    padding: 24px 28px;
+    border-radius: 14px;
     background: var(--accent);
     color: var(--accent-tekst);
-    font-weight: 600;
+    text-align: center;
+    line-height: 1.5;
+    box-shadow: 0 10px 40px rgb(0 0 0 / 0.35);
+  }
+  .update-titel {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .update-kaart p {
+    margin: 0;
   }
 </style>

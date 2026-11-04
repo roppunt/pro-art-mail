@@ -136,7 +136,7 @@ Een eigen email programma/app in eigen styl
   had herstart (op 23-10 ook al twee 0.2.0-downloads binnen 10 s). Daarnaast een **schermvullende melding tijdens het bijwerken** ("niet afsluiten en
   niet opnieuw op het icoon klikken"). Getest op ai-ubuntu: tweede start stopt meteen, één proces. Melding zelf niet visueel getest.
   Uitrol 2026-11-04 ~18:50 via SSH (akkoord Robert): kassa1 0.2.3→0.2.4, kassa2 0.2.2→0.2.4 (`setup.exe /S`), lijst-pc AppImage vervangen.
-  KANTOOR stond uit (0.2.3), laptop lijstenmakerij onbereikbaar: die werken zichzelf bij bij de volgende start.
+  KANTOOR stond uit tijdens de uitrol, maar is dezelfde avond bijgewerkt (volgens Robert; door ons niet gecontroleerd). Laptop lijstenmakerij: niemand kan erbij, werkt zichzelf bij bij de volgende start.
   Stil bijwerken op afstand: download + sha256, app netjes sluiten, `setup.exe /S`, en als hij draaide weer starten met een eenmalige `schtasks … /it /ru <gebruiker>`.
   ⚠️ Let op bij het nakijken: NSIS neemt de bouwtijd mee als bestandsdatum van `pro-art-mail.exe`; die datum zegt dus niets over wanneer de update is geïnstalleerd.
 

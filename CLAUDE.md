@@ -140,7 +140,7 @@ Een eigen email programma/app in eigen styl
   Stil bijwerken op afstand: download + sha256, app netjes sluiten, `setup.exe /S`, en als hij draaide weer starten met een eenmalige `schtasks … /it /ru <gebruiker>`.
   ⚠️ Let op bij het nakijken: NSIS neemt de bouwtijd mee als bestandsdatum van `pro-art-mail.exe`; die datum zegt dus niets over wanneer de update is geïnstalleerd.
 
-- **0.2.5** (2026-11-07, nog niet uitgebracht): **prullenbak legen na 60 dagen** (vraag Robert; de prullenbak kon nergens geleegd worden en
+- **0.2.5** (2026-11-07, uitgebracht ~16:45, akkoord winkel): **prullenbak legen na 60 dagen** (vraag Robert; de prullenbak kon nergens geleegd worden en
   de server doet het niet zelf: info@ had 1.491 berichten in `Trash`, oudste februari 2024). De server weet niet wanneer iets in de prullenbak
   kwam (MOVE houdt INTERNALDATE), dus de kopie kreeg kolom `binnen` = wanneer déze pc het bericht voor het eerst zag (bij de migratie: nu,
   dus de eerste berichten verdwijnen ~2027-01-06). `sync.rs` `leeg_prullenbak` na elke ronde langs alle mappen: alleen de vaste prullenbak

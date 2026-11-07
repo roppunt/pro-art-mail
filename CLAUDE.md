@@ -140,6 +140,13 @@ Een eigen email programma/app in eigen styl
   Stil bijwerken op afstand: download + sha256, app netjes sluiten, `setup.exe /S`, en als hij draaide weer starten met een eenmalige `schtasks … /it /ru <gebruiker>`.
   ⚠️ Let op bij het nakijken: NSIS neemt de bouwtijd mee als bestandsdatum van `pro-art-mail.exe`; die datum zegt dus niets over wanneer de update is geïnstalleerd.
 
+- **0.2.5** (2026-11-07, nog niet uitgebracht): **prullenbak legen na 60 dagen** (vraag Robert; de prullenbak kon nergens geleegd worden en
+  de server doet het niet zelf: info@ had 1.491 berichten in `Trash`, oudste februari 2024). De server weet niet wanneer iets in de prullenbak
+  kwam (MOVE houdt INTERNALDATE), dus de kopie kreeg kolom `binnen` = wanneer déze pc het bericht voor het eerst zag (bij de migratie: nu,
+  dus de eerste berichten verdwijnen ~2027-01-06). `sync.rs` `leeg_prullenbak` na elke ronde langs alle mappen: alleen de vaste prullenbak
+  (niet `Deleted Messages`), alleen als de kopie compleet is en de UIDVALIDITY klopt, nooit berichten met een ster. Een pc die later
+  begint telt zelf vanaf dan, dus nooit te vroeg. Definitief = ook weg in eM Client, webmail en telefoons. Strook in de prullenbak meldt het.
+
 ## Volgende stappen (stand 2026-10-22)
 - ✅ **Automatische updates werken** op Windows én Zorin (bevestigd door Robert 2026-10-23).
 - Ondertekensleutel (`~/.tauri/pro-art-mail.key` + `.key.wachtwoord`) ook in Roberts wachtwoordbeheerder laten zetten (nog niet bevestigd).

@@ -3,7 +3,8 @@
 //! Ronde: eerst de map waar de gebruiker naar kijkt, dan het postvak IN, dan (de eerste keer
 //! en daarna elk kwartier) alle andere mappen. Tussen de rondes wacht de verbinding met IDLE
 //! op het postvak IN, zodat nieuwe mail binnen enkele seconden verschijnt.
-//! Ook hier alleen lezen: EXAMINE en BODY.PEEK.
+//! Ook hier alleen lezen (EXAMINE en BODY.PEEK), met één uitzondering: na elke ronde langs alle
+//! mappen gaat mail die al 60 dagen in de prullenbak staat definitief weg (`leeg_prullenbak`).
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +21,8 @@ use crate::{account, cache::Cache, imap};
 const PER_KEER: usize = 500;
 const ALLES_ELKE: Duration = Duration::from_secs(15 * 60);
 const IDLE_MAX: Duration = Duration::from_secs(10 * 60);
+/// Na zoveel dagen in de prullenbak verdwijnt een bericht definitief (besluit Robert 2026-11-07).
+const PRULLENBAK_DAGEN: u32 = 60;
 
 #[derive(Default)]
 pub struct Sync {
@@ -112,6 +115,7 @@ async fn ronde(app: &AppHandle, email: &str, cache: &Cache, sync: &Sync) -> Resu
         }
         if alles {
             laatste_alles = Some(Instant::now());
+            leeg_prullenbak(app, email, cache, &mut v).await?;
         }
 
         // Account verwijderd of instellingen gewijzigd? Dan stoppen of opnieuw verbinden.
@@ -122,6 +126,23 @@ async fn ronde(app: &AppHandle, email: &str, cache: &Cache, sync: &Sync) -> Resu
         v.open("INBOX").await?;
         v = v.wacht(&sync.signaal, IDLE_MAX).await?;
     }
+}
+
+/// Gooit mail weg die deze pc al `PRULLENBAK_DAGEN` dagen in de prullenbak ziet staan.
+/// Alleen de echte prullenbak van de mailbox, alleen als de kopie van die map compleet is,
+/// en nooit berichten met een ster.
+async fn leeg_prullenbak(app: &AppHandle, account: &str, cache: &Cache, v: &mut imap::Verbinding) -> Result<()> {
+    let Some((map, _)) = v.vaste_map("prullenbak").await? else { return Ok(()) };
+    if !cache.is_klaar(&map)? {
+        return Ok(());
+    }
+    let Some(uidvalidity) = cache.uidvalidity(&map)? else { return Ok(()) };
+    let oud = cache.langer_dan(&map, PRULLENBAK_DAGEN)?;
+    if v.wis_definitief(&map, uidvalidity, &oud).await? {
+        cache.werk_bij(&map, &oud, &[])?;
+        let _ = app.emit("map-gewijzigd", Gebeurtenis { account, map: &map });
+    }
+    Ok(())
 }
 
 async fn werk_map_bij(app: &AppHandle, account: &str, cache: &Cache, v: &mut imap::Verbinding, map: &str) -> Result<()> {

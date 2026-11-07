@@ -332,6 +332,27 @@ impl Verbinding {
         Ok(())
     }
 
+    /// Verwijdert berichten definitief, ook op de achtergrondverbinding (opent de map dan even met
+    /// SELECT). Doet niets als de map intussen een andere UIDVALIDITY heeft: dan horen de UID's
+    /// bij andere berichten. Geeft terug of er gewist is.
+    pub async fn wis_definitief(&mut self, map: &str, uidvalidity: u32, uids: &[u32]) -> Result<bool> {
+        if uids.is_empty() {
+            return Ok(false);
+        }
+        let mb = self.sessie.select(map).await.with_context(|| format!("Kan map {map} niet openen"))?;
+        // Volgende `open` opent de map weer zoals deze verbinding hoort (EXAMINE of SELECT).
+        self.open_map = None;
+        if mb.uid_validity != Some(uidvalidity) {
+            return Ok(false);
+        }
+        for stuk in uids.chunks(500) {
+            let reeks = uid_reeks(stuk);
+            let _: Vec<_> = self.sessie.uid_store(&reeks, "+FLAGS.SILENT (\\Deleted)").await?.try_collect().await?;
+            let _: Vec<_> = self.sessie.uid_expunge(&reeks).await?.try_collect().await?;
+        }
+        Ok(true)
+    }
+
     /// UID's van berichten met een bepaalde Message-ID (om een oud concept terug te vinden).
     pub async fn zoek_message_id(&mut self, map: &str, message_id: &str) -> Result<Vec<u32>> {
         self.zorg_open(map).await?;

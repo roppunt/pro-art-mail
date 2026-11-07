@@ -531,6 +531,9 @@
           </button>
         </div>
       {/if}
+      {#if !resultaten && soortVan(huidigeMap) === "prullenbak"}
+        <p class="strook">Mail in de prullenbak verdwijnt na 60 dagen vanzelf. Mail met een ster blijft staan.</p>
+      {/if}
       {#if verbindingsfout}
         <p class="strook waarschuwing" role="status">Geen verbinding met de mailserver. De app probeert het zo opnieuw.</p>
       {/if}

@@ -56,6 +56,17 @@ impl Cache {
                  CREATE INDEX IF NOT EXISTS koppen_met_ster ON koppen (gemarkeerd) WHERE gemarkeerd = 1;",
             )?;
         }
+        // Kolom `binnen` (v0.2.5): wanneer deze pc het bericht voor het eerst in de map zag, in seconden
+        // sinds 1970. De server weet niet wanneer iets in de prullenbak kwam (verplaatsen houdt de
+        // ontvangstdatum), dus het automatisch legen van de prullenbak rekent vanaf dit moment.
+        // Berichten die er al stonden tellen vanaf nu.
+        let heeft_binnen: bool = db.prepare("SELECT 1 FROM pragma_table_info('koppen') WHERE name = 'binnen'")?.exists([])?;
+        if !heeft_binnen {
+            db.execute_batch(
+                "ALTER TABLE koppen ADD COLUMN binnen INTEGER NOT NULL DEFAULT 0;
+                 UPDATE koppen SET binnen = CAST(strftime('%s', 'now') AS INTEGER);",
+            )?;
+        }
         Ok(Cache { db: Mutex::new(db) })
     }
 
@@ -79,6 +90,23 @@ impl Cache {
     pub fn zet_klaar(&self, pad: &str) -> Result<()> {
         self.db.lock().unwrap().execute("UPDATE mappen SET klaar = 1 WHERE pad = ?1", [pad])?;
         Ok(())
+    }
+
+    /// UIDVALIDITY waarmee de kopie van deze map is opgebouwd.
+    pub fn uidvalidity(&self, pad: &str) -> Result<Option<u32>> {
+        let db = self.db.lock().unwrap();
+        Ok(db.query_row("SELECT uidvalidity FROM mappen WHERE pad = ?1", [pad], |r| r.get(0)).optional()?)
+    }
+
+    /// Berichten die deze pc al minstens `dagen` dagen in de map ziet staan (zonder ster).
+    pub fn langer_dan(&self, pad: &str, dagen: u32) -> Result<Vec<u32>> {
+        let db = self.db.lock().unwrap();
+        let mut st = db.prepare(
+            "SELECT uid FROM koppen WHERE map = ?1 AND gemarkeerd = 0 AND binnen > 0
+             AND binnen < CAST(strftime('%s', 'now') AS INTEGER) - ?2 * 86400",
+        )?;
+        let uids = st.query_map(params![pad, dagen], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        Ok(uids)
     }
 
     pub fn is_klaar(&self, pad: &str) -> Result<bool> {
@@ -129,8 +157,8 @@ impl Cache {
         {
             let mut ins = tx.prepare(
                 "INSERT OR REPLACE INTO koppen
-                 (map, uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage, zoek, gemarkeerd)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 (map, uid, van_naam, van_adres, onderwerp, datum, gelezen, beantwoord, grootte, bijlage, zoek, gemarkeerd, binnen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, CAST(strftime('%s', 'now') AS INTEGER))",
             )?;
             for k in koppen {
                 let zoek = format!("{} {} {}", k.van_naam, k.van_adres, k.onderwerp).to_lowercase();
